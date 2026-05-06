@@ -160,15 +160,34 @@ std::vector<std::shared_ptr<const Submap2D>> ActiveSubmaps2D::submaps() const {
 
 std::vector<std::shared_ptr<const Submap2D>> ActiveSubmaps2D::InsertRangeData(
     const sensor::RangeData& range_data) {
+  static int count_once = 1;
+  static int max_count = 2 * count_once;
+  static bool trigger_once = false;
   if (submaps_.empty() ||
-      submaps_.back()->num_range_data() == options_.num_range_data()) {
+      submaps_.back()->num_range_data() == count_once ||
+      trigger_once) {
+    if (trigger_once) {
+      trigger_once = false;
+    }
     AddSubmap(range_data.origin.head<2>());
+    std::cout << "add submap; current size: " << submaps_.size() << std::endl;
   }
+
   for (auto& submap : submaps_) {
     submap->InsertRangeData(range_data, range_data_inserter_.get());
   }
-  if (submaps_.front()->num_range_data() == 2 * options_.num_range_data()) {
+  // TODO: modify to apply relocalization
+  if (submaps_.front()->num_range_data() == max_count) {
+    if (max_count == 1 + options_.num_range_data()) {
+      max_count = 2 * options_.num_range_data();
+    }
+    if (count_once == 1) {
+      max_count = 1 + options_.num_range_data();
+      count_once = options_.num_range_data();
+      trigger_once = true;
+    }
     submaps_.front()->Finish();
+    std::cout << "finish submap; current size: " << submaps_.size() << std::endl;
   }
   return submaps();
 }

@@ -180,6 +180,13 @@ void MapBuilder::FinishTrajectory(const int trajectory_id) {
   pose_graph_->FinishTrajectory(trajectory_id);
 }
 
+void MapBuilder::DeleteTrajectory(const int trajectory_id) {
+  // sensor_collator_->FinishTrajectory(trajectory_id);
+  // pose_graph_->FinishTrajectory(trajectory_id);
+  pose_graph_->DeleteTrajectory(trajectory_id);
+  std::cout << "debug: pose graph delete trajectory done" << std::endl;
+}
+
 std::string MapBuilder::SubmapToProto(
     const SubmapId& submap_id, proto::SubmapQuery::Response* const response) {
   if (submap_id.trajectory_id < 0 ||

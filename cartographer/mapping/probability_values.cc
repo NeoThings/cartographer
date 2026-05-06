@@ -33,7 +33,7 @@ float SlowValueToBoundedFloat(const uint16 value, const uint16 unknown_value,
   CHECK_LT(value, kValueCount);
   if (value == unknown_value) return unknown_result;
   const float kScale = (upper_bound - lower_bound) / (kValueCount - 2.f);
-  return value * kScale + (lower_bound - kScale);
+  return value * kScale + (lower_bound - kScale); // (value - 1) * kScale + lower_bound
 }
 
 std::unique_ptr<std::vector<float>> PrecomputeValueToBoundedFloat(

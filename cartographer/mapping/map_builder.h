@@ -48,6 +48,7 @@ class MapBuilder : public MapBuilderInterface {
           &options_with_sensor_ids_proto) override;
 
   void FinishTrajectory(int trajectory_id) override;
+  void DeleteTrajectory(int trajectory_id) override;
 
   std::string SubmapToProto(const SubmapId &submap_id,
                             proto::SubmapQuery::Response *response) override;

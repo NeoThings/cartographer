@@ -76,6 +76,9 @@ class MapBuilderInterface {
   // i.e. no further sensor data is expected.
   virtual void FinishTrajectory(int trajectory_id) = 0;
 
+  // TODO:add annotate
+  virtual void DeleteTrajectory(int trajectory_id) = 0;
+
   // Fills the SubmapQuery::Response corresponding to 'submap_id'. Returns an
   // error string on failure, or an empty string on success.
   virtual std::string SubmapToProto(const SubmapId& submap_id,
