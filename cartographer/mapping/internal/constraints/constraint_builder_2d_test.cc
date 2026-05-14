@@ -85,6 +85,7 @@ TEST_F(ConstraintBuilder2DTest, FindsConstraints) {
     EXPECT_EQ(constraint_builder_->GetNumFinishedNodes(), expected_nodes);
     for (int j = 0; j < 2; ++j) {
       constraint_builder_->MaybeAddConstraint(submap_id, &submap, NodeId{0, 0},
+                                              false,
                                               &node_data,
                                               transform::Rigid2d::Identity());
     }

@@ -76,7 +76,7 @@ class ConstraintBuilder2D {
   // The pointees of 'submap' and 'compressed_point_cloud' must stay valid until
   // all computations are finished.
   void MaybeAddConstraint(const SubmapId& submap_id, const Submap2D* submap,
-                          const NodeId& node_id,
+                          const NodeId& node_id, bool enhance_search, /*enlarge local match search scale*/
                           const TrajectoryNode::Data* const constant_data,
                           const transform::Rigid2d& initial_relative_pose);
 
@@ -125,6 +125,7 @@ class ConstraintBuilder2D {
   // anymore. As output, it may create a new Constraint in 'constraint'.
   void ComputeConstraint(const SubmapId& submap_id, const Submap2D* submap,
                          const NodeId& node_id, bool match_full_submap,
+                         bool enhance_match, // perform a enhanced local match
                          const TrajectoryNode::Data* const constant_data,
                          const transform::Rigid2d& initial_relative_pose,
                          const SubmapScanMatcher& submap_scan_matcher,

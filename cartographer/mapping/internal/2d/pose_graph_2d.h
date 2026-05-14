@@ -193,7 +193,8 @@ class PoseGraph2D : public PoseGraph {
       bool newly_finished_submap) LOCKS_EXCLUDED(mutex_);
 
   // Computes constraints for a node and submap pair.
-  void ComputeConstraint(const NodeId& node_id, const SubmapId& submap_id)
+  void ComputeConstraint(const NodeId& node_id, const SubmapId& submap_id, 
+                         bool enhance_search)
       LOCKS_EXCLUDED(mutex_);
 
   // Deletes trajectories waiting for deletion. Must not be called during

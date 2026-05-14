@@ -198,13 +198,22 @@ FastCorrelativeScanMatcher2D::~FastCorrelativeScanMatcher2D() {}
 bool FastCorrelativeScanMatcher2D::Match(
     const transform::Rigid2d& initial_pose_estimate,
     const sensor::PointCloud& point_cloud, const float min_score, float* score,
-    transform::Rigid2d* pose_estimate) const {
-  const SearchParameters search_parameters(options_.linear_search_window(),
-                                           options_.angular_search_window(),
-                                           point_cloud, limits_.resolution());
-  return MatchWithSearchParameters(search_parameters, initial_pose_estimate,
-                                   point_cloud, min_score, score,
-                                   pose_estimate);
+    transform::Rigid2d* pose_estimate, bool enhanced) const {
+  if (enhanced) {
+    const SearchParameters search_parameters(options_.linear_search_window(),
+                                             M_PI, 
+                                             point_cloud, limits_.resolution());
+    return MatchWithSearchParameters(search_parameters, initial_pose_estimate,
+                                     point_cloud, min_score, score,
+                                     pose_estimate);
+  } else {
+    const SearchParameters search_parameters(options_.linear_search_window(),
+                                             options_.angular_search_window(),
+                                             point_cloud, limits_.resolution());
+    return MatchWithSearchParameters(search_parameters, initial_pose_estimate,
+                                     point_cloud, min_score, score,
+                                     pose_estimate);
+  }
 }
 
 bool FastCorrelativeScanMatcher2D::MatchFullSubmap(

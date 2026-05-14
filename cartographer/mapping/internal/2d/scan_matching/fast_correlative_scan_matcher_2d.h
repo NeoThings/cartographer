@@ -126,7 +126,7 @@ class FastCorrelativeScanMatcher2D {
   // with the result.
   bool Match(const transform::Rigid2d& initial_pose_estimate,
              const sensor::PointCloud& point_cloud, float min_score,
-             float* score, transform::Rigid2d* pose_estimate) const;
+             float* score, transform::Rigid2d* pose_estimate, bool enhanced) const;
 
   // Aligns 'point_cloud' within the full 'grid', i.e., not
   // restricted to the configured search window. If a score above 'min_score'

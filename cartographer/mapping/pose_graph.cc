@@ -90,6 +90,8 @@ proto::PoseGraphOptions CreatePoseGraphOptions(
   proto::PoseGraphOptions options;
   options.set_optimize_every_n_nodes(
       parameter_dictionary->GetInt("optimize_every_n_nodes"));
+  options.set_optimization_on_first_node(
+      parameter_dictionary->GetBool("optimization_on_first_node"));
   *options.mutable_constraint_builder_options() =
       constraints::CreateConstraintBuilderOptions(
           parameter_dictionary->GetDictionary("constraint_builder").get());

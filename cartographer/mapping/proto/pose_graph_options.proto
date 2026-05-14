@@ -56,6 +56,10 @@ message PoseGraphOptions {
   // globally rather than in a smaller search window.
   double global_constraint_search_after_n_seconds = 10;
 
+  // Run optimization when the first range data add in pose graph
+  // used to perform relocalization via local matching
+  bool optimization_on_first_node = 12;
+ 
   message OverlappingSubmapsTrimmerOptions2D {
     int32 fresh_submaps_count = 1;
     double min_covered_area = 2;

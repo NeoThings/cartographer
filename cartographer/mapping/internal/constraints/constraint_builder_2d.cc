@@ -76,7 +76,8 @@ ConstraintBuilder2D::~ConstraintBuilder2D() {
 
 void ConstraintBuilder2D::MaybeAddConstraint(
     const SubmapId& submap_id, const Submap2D* const submap,
-    const NodeId& node_id, const TrajectoryNode::Data* const constant_data,
+    const NodeId& node_id, bool enhance_search,
+    const TrajectoryNode::Data* const constant_data,
     const transform::Rigid2d& initial_relative_pose) {
   if (initial_relative_pose.translation().norm() >
       options_.max_constraint_distance()) {
@@ -102,6 +103,7 @@ void ConstraintBuilder2D::MaybeAddConstraint(
   auto constraint_task = absl::make_unique<common::Task>();
   constraint_task->SetWorkItem([=]() LOCKS_EXCLUDED(mutex_) {
     ComputeConstraint(submap_id, submap, node_id, false, /* match_full_submap */
+                      enhance_search,
                       constant_data, initial_relative_pose, *scan_matcher,
                       constraint);
   });
@@ -127,6 +129,7 @@ void ConstraintBuilder2D::MaybeAddGlobalConstraint(
   auto constraint_task = absl::make_unique<common::Task>();
   constraint_task->SetWorkItem([=]() LOCKS_EXCLUDED(mutex_) {
     ComputeConstraint(submap_id, submap, node_id, true, /* match_full_submap */
+                      false, /* match full submap don't need enhance */
                       constant_data, transform::Rigid2d::Identity(),
                       *scan_matcher, constraint);
   });
@@ -188,6 +191,7 @@ ConstraintBuilder2D::DispatchScanMatcherConstruction(const SubmapId& submap_id,
 void ConstraintBuilder2D::ComputeConstraint(
     const SubmapId& submap_id, const Submap2D* const submap,
     const NodeId& node_id, bool match_full_submap,
+    bool enhance_match,
     const TrajectoryNode::Data* const constant_data,
     const transform::Rigid2d& initial_relative_pose,
     const SubmapScanMatcher& submap_scan_matcher,
@@ -209,12 +213,10 @@ void ConstraintBuilder2D::ComputeConstraint(
   // 2. Prune if the score is too low.
   // 3. Refine.
   if (match_full_submap) {
-    std::cout << "debug: match full" << std::endl;
     kGlobalConstraintsSearchedMetric->Increment();
     if (submap_scan_matcher.fast_correlative_scan_matcher->MatchFullSubmap(
             constant_data->filtered_gravity_aligned_point_cloud,
             options_.global_localization_min_score(), &score, &pose_estimate)) {
-      std::cout << "debug: got a global match" << std::endl;
       CHECK_GT(score, options_.global_localization_min_score());
       CHECK_GE(node_id.trajectory_id, 0);
       CHECK_GE(submap_id.trajectory_id, 0);
@@ -224,13 +226,11 @@ void ConstraintBuilder2D::ComputeConstraint(
       return;
     }
   } else {
-    std::cout << "debug: match local" << std::endl;
     kConstraintsSearchedMetric->Increment();
     if (submap_scan_matcher.fast_correlative_scan_matcher->Match(
             initial_pose, constant_data->filtered_gravity_aligned_point_cloud,
-            options_.min_score(), &score, &pose_estimate)) {
+            options_.min_score(), &score, &pose_estimate, enhance_match)) {
       // We've reported a successful local match.
-      std::cout << "debug: got a local match" << std::endl;
       CHECK_GT(score, options_.min_score());
       kConstraintsFoundMetric->Increment();
       kConstraintScoresMetric->Observe(score);

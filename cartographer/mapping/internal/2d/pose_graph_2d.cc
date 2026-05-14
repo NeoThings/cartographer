@@ -158,6 +158,10 @@ NodeId PoseGraph2D::AddNode(
   const transform::Rigid3d optimized_pose(
       GetLocalToGlobalTransform(trajectory_id) * constant_data->local_pose);
 
+  // std::cout << "[debug] optimized pose when add node: " 
+  //           << optimized_pose.translation()[0] << ", "
+  //           << optimized_pose.translation()[1] << std::endl;
+
   const NodeId node_id = AppendNode(constant_data, trajectory_id,
                                     insertion_submaps, optimized_pose);
   // We have to check this here, because it might have changed by the time we
@@ -259,7 +263,8 @@ void PoseGraph2D::AddLandmarkData(int trajectory_id,
 }
 
 void PoseGraph2D::ComputeConstraint(const NodeId& node_id,
-                                    const SubmapId& submap_id) {
+                                    const SubmapId& submap_id,
+                                    bool enhance_search) {
   bool maybe_add_local_constraint = false;
   bool maybe_add_global_constraint = false;
   const TrajectoryNode::Data* constant_data;
@@ -278,14 +283,17 @@ void PoseGraph2D::ComputeConstraint(const NodeId& node_id,
         data_.trajectory_connectivity_state.LastConnectionTime(
             node_id.trajectory_id, submap_id.trajectory_id);
     if (node_id.trajectory_id == submap_id.trajectory_id ||
-        node_time <
-            last_connection_time +
-                common::FromSeconds(
-                    options_.global_constraint_search_after_n_seconds())) {
+        node_time < last_connection_time +
+        common::FromSeconds(options_.global_constraint_search_after_n_seconds()) ||
+        (options_.optimization_on_first_node() && 
+        data_.trajectory_nodes.SizeOfTrajectoryOrZero(node_id.trajectory_id) == 1)) {
       // If the node and the submap belong to the same trajectory or if there
       // has been a recent global constraint that ties that node's trajectory to
       // the submap's trajectory, it suffices to do a match constrained to a
       // local search window.
+      // std::cout << "[debug] maybe add local constraint between node: " 
+      //           << node_id.trajectory_id << ", " << node_id.node_index << " and submap: "
+      //           << submap_id.trajectory_id << ", " << submap_id.submap_index << std::endl;
       maybe_add_local_constraint = true;
     } else if (global_localization_samplers_[node_id.trajectory_id]->Pulse()) {
       maybe_add_global_constraint = true;
@@ -302,7 +310,7 @@ void PoseGraph2D::ComputeConstraint(const NodeId& node_id,
             .global_pose.inverse() *
         optimization_problem_->node_data().at(node_id).global_pose_2d;
     constraint_builder_.MaybeAddConstraint(
-        submap_id, submap, node_id, constant_data, initial_relative_pose);
+        submap_id, submap, node_id, enhance_search, constant_data, initial_relative_pose);
   } else if (maybe_add_global_constraint) {
     constraint_builder_.MaybeAddGlobalConstraint(submap_id, submap, node_id,
                                                  constant_data);
@@ -376,8 +384,20 @@ WorkItem::Result PoseGraph2D::ComputeConstraintsForNode(
     }
   }
 
+  bool trigger_optimization = false;
+  bool enhance_search = false;
+  if (options_.optimization_on_first_node() && 
+      data_.trajectory_nodes.SizeOfTrajectoryOrZero(node_id.trajectory_id) == 1) {
+    trigger_optimization = true;
+    enhance_search = true;
+    std::cout << "[debug] trigger optimazation and enhance search once by the first node" << std::endl;
+  }
+
   for (const auto& submap_id : finished_submap_ids) {
-    ComputeConstraint(node_id, submap_id);
+    // std::cout << "[debug] search constraint from submap: " 
+    //           << submap_id.trajectory_id << ", " 
+    //           << submap_id.submap_index << std::endl;
+    ComputeConstraint(node_id, submap_id, enhance_search);
   }
 
   if (newly_finished_submap) {
@@ -387,18 +407,18 @@ WorkItem::Result PoseGraph2D::ComputeConstraintsForNode(
     for (const auto& node_id_data : optimization_problem_->node_data()) {
       const NodeId& node_id = node_id_data.id;
       if (newly_finished_submap_node_ids.count(node_id) == 0) {
-        ComputeConstraint(node_id, newly_finished_submap_id);
+        ComputeConstraint(node_id, newly_finished_submap_id, false);
       }
     }
   }
   constraint_builder_.NotifyEndOfNode();
   absl::MutexLock locker(&mutex_);
   ++num_nodes_since_last_loop_closure_;
-  static bool trigger_optimization = true;
+
   if ((options_.optimize_every_n_nodes() > 0 &&
-      num_nodes_since_last_loop_closure_ > options_.optimize_every_n_nodes()) or trigger_optimization) {
+      num_nodes_since_last_loop_closure_ > options_.optimize_every_n_nodes()) ||
+      trigger_optimization) {
     return WorkItem::Result::kRunOptimization;
-    trigger_optimization = false;
   }
   return WorkItem::Result::kDoNotRunOptimization;
 }
@@ -1045,6 +1065,7 @@ void PoseGraph2D::SetInitialTrajectoryPose(const int from_trajectory_id,
                                            const transform::Rigid3d& pose,
                                            const common::Time time) {
   absl::MutexLock locker(&mutex_);
+  std::cout << "[debug] set initial trajectory pose in pose graph" << std::endl;
   data_.initial_trajectory_poses[from_trajectory_id] =
       InitialTrajectoryPose{to_trajectory_id, pose, time};
 }

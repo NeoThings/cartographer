@@ -182,7 +182,7 @@ TEST(FastCorrelativeScanMatcherTest, CorrectPose) {
     float score;
     EXPECT_TRUE(fast_correlative_scan_matcher.Match(
         transform::Rigid2d::Identity(), point_cloud, kMinScore, &score,
-        &pose_estimate));
+        &pose_estimate, false));
     EXPECT_LT(kMinScore, score);
     EXPECT_THAT(expected_pose,
                 transform::IsNearly(pose_estimate.cast<float>(), 0.03f))

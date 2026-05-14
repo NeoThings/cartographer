@@ -14,6 +14,7 @@
 
 POSE_GRAPH = {
   optimize_every_n_nodes = 90,
+  optimization_on_first_node = true,
   constraint_builder = {
     sampling_ratio = 0.3,
     max_constraint_distance = 15.,
