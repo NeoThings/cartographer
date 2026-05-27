@@ -390,7 +390,7 @@ WorkItem::Result PoseGraph2D::ComputeConstraintsForNode(
       data_.trajectory_nodes.SizeOfTrajectoryOrZero(node_id.trajectory_id) == 1) {
     trigger_optimization = true;
     enhance_search = true;
-    std::cout << "[debug] trigger optimazation and enhance search once by the first node" << std::endl;
+    std::cout << "[Debug] ------ Trigger optimazation and enhance search once" << std::endl;
   }
 
   for (const auto& submap_id : finished_submap_ids) {
@@ -400,15 +400,22 @@ WorkItem::Result PoseGraph2D::ComputeConstraintsForNode(
     ComputeConstraint(node_id, submap_id, enhance_search);
   }
 
-  if (newly_finished_submap) {
-    const SubmapId newly_finished_submap_id = submap_ids.front();
-    // We have a new completed submap, so we look into adding constraints for
-    // old nodes.
-    for (const auto& node_id_data : optimization_problem_->node_data()) {
-      const NodeId& node_id = node_id_data.id;
-      if (newly_finished_submap_node_ids.count(node_id) == 0) {
-        ComputeConstraint(node_id, newly_finished_submap_id, false);
+  if (newly_finished_submap) { 
+    /* TODO: we only push the pure localization trimmer right now, 
+       so we can use empty to verify, if we push other trimmers to queue
+       we need check if it can convert to pure localization trimmer */
+    if (trimmers_.empty()) {
+      const SubmapId newly_finished_submap_id = submap_ids.front();
+      // We have a new completed submap, so we look into adding constraints for
+      // old nodes.
+      for (const auto& node_id_data : optimization_problem_->node_data()) {
+        const NodeId& node_id = node_id_data.id;
+        if (newly_finished_submap_node_ids.count(node_id) == 0) {
+          ComputeConstraint(node_id, newly_finished_submap_id, false);
+        }
       }
+    } else {
+      std::cout << "[Debug] ------ Skip constraints: newly_finished_submap w.r.t old nodes" << std::endl;
     }
   }
   constraint_builder_.NotifyEndOfNode();
