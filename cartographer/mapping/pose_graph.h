@@ -134,6 +134,12 @@ class PoseGraph : public PoseGraphInterface {
                                         int to_trajectory_id,
                                         const transform::Rigid3d& pose,
                                         const common::Time time) = 0;
+
+  /* Signals the pose graph to skip WaitForAllComputations() 
+     and pass signal to constraint builder
+     Pending work will be consumed (computation without add constraints).
+     Only call before destruction. */
+  virtual void SetShutdown() {}
 };
 
 std::vector<PoseGraph::Constraint> FromProto(

@@ -67,6 +67,17 @@ ConstraintBuilder2D::ConstraintBuilder2D(
 
 ConstraintBuilder2D::~ConstraintBuilder2D() {
   absl::MutexLock locker(&mutex_);
+  if (shutdown_) {
+    // Fast shutdown: skip assertions
+    constraints_.clear();
+    when_done_.reset();
+    // CHECK_EQ(finish_node_task_->GetState(), common::Task::NEW);
+    // CHECK_EQ(when_done_task_->GetState(), common::Task::NEW);
+    // CHECK_EQ(constraints_.size(), 0) << "WhenDone() was not called";
+    // CHECK_EQ(num_started_nodes_, num_finished_nodes_);
+    // CHECK(when_done_ == nullptr);
+    return;
+  }
   CHECK_EQ(finish_node_task_->GetState(), common::Task::NEW);
   CHECK_EQ(when_done_task_->GetState(), common::Task::NEW);
   CHECK_EQ(constraints_.size(), 0) << "WhenDone() was not called";
@@ -79,6 +90,7 @@ void ConstraintBuilder2D::MaybeAddConstraint(
     const NodeId& node_id, bool enhance_search,
     const TrajectoryNode::Data* const constant_data,
     const transform::Rigid2d& initial_relative_pose) {
+  if (shutdown_) return;
   if (initial_relative_pose.translation().norm() >
       options_.max_constraint_distance()) {
     return;
@@ -91,6 +103,8 @@ void ConstraintBuilder2D::MaybeAddConstraint(
   }
 
   absl::MutexLock locker(&mutex_);
+  // re-check after got locker
+  if (shutdown_) return;
   if (when_done_) {
     LOG(WARNING)
         << "MaybeAddConstraint was called while WhenDone was scheduled.";
@@ -100,8 +114,14 @@ void ConstraintBuilder2D::MaybeAddConstraint(
   auto* const constraint = &constraints_.back();
   const auto* scan_matcher =
       DispatchScanMatcherConstruction(submap_id, submap->grid());
+  if (!scan_matcher) {
+    constraints_.pop_back();
+    return;
+  }
   auto constraint_task = absl::make_unique<common::Task>();
   constraint_task->SetWorkItem([=]() LOCKS_EXCLUDED(mutex_) {
+    // re-check while the work is actually in progress
+    if (shutdown_) return;
     ComputeConstraint(submap_id, submap, node_id, false, /* match_full_submap */
                       enhance_search,
                       constant_data, initial_relative_pose, *scan_matcher,
@@ -116,7 +136,10 @@ void ConstraintBuilder2D::MaybeAddConstraint(
 void ConstraintBuilder2D::MaybeAddGlobalConstraint(
     const SubmapId& submap_id, const Submap2D* const submap,
     const NodeId& node_id, const TrajectoryNode::Data* const constant_data) {
+  if (shutdown_) return;
   absl::MutexLock locker(&mutex_);
+  // re-check while the work is actually in progress
+  if (shutdown_) return;
   if (when_done_) {
     LOG(WARNING)
         << "MaybeAddGlobalConstraint was called while WhenDone was scheduled.";
@@ -126,8 +149,14 @@ void ConstraintBuilder2D::MaybeAddGlobalConstraint(
   auto* const constraint = &constraints_.back();
   const auto* scan_matcher =
       DispatchScanMatcherConstruction(submap_id, submap->grid());
+  if (!scan_matcher) {
+    constraints_.pop_back();
+    return;
+  }
   auto constraint_task = absl::make_unique<common::Task>();
   constraint_task->SetWorkItem([=]() LOCKS_EXCLUDED(mutex_) {
+    // re-check while the work is actually in progress
+    if (shutdown_) return;
     ComputeConstraint(submap_id, submap, node_id, true, /* match_full_submap */
                       false, /* match full submap don't need enhance */
                       constant_data, transform::Rigid2d::Identity(),
@@ -169,6 +198,7 @@ const ConstraintBuilder2D::SubmapScanMatcher*
 ConstraintBuilder2D::DispatchScanMatcherConstruction(const SubmapId& submap_id,
                                                      const Grid2D* const grid) {
   CHECK(grid);
+  if (shutdown_) return nullptr;
   if (submap_scan_matchers_.count(submap_id) != 0) {
     return &submap_scan_matchers_.at(submap_id);
   }
@@ -178,7 +208,9 @@ ConstraintBuilder2D::DispatchScanMatcherConstruction(const SubmapId& submap_id,
   auto& scan_matcher_options = options_.fast_correlative_scan_matcher_options();
   auto scan_matcher_task = absl::make_unique<common::Task>();
   scan_matcher_task->SetWorkItem(
-      [&submap_scan_matcher, &scan_matcher_options]() {
+      [this, &submap_scan_matcher, &scan_matcher_options]() {
+        // re-check while the work is actually in progress
+        if (shutdown_) return;
         submap_scan_matcher.fast_correlative_scan_matcher =
             absl::make_unique<scan_matching::FastCorrelativeScanMatcher2D>(
                 *submap_scan_matcher.grid, scan_matcher_options);

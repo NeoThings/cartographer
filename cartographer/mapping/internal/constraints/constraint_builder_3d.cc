@@ -69,6 +69,12 @@ ConstraintBuilder3D::ConstraintBuilder3D(
 
 ConstraintBuilder3D::~ConstraintBuilder3D() {
   absl::MutexLock locker(&mutex_);
+  if (shutdown_) {
+    // Fast shutdown: skip assertions, abandon pending work.
+    constraints_.clear();
+    when_done_.reset();
+    return;
+  }
   CHECK_EQ(finish_node_task_->GetState(), common::Task::NEW);
   CHECK_EQ(when_done_task_->GetState(), common::Task::NEW);
   CHECK_EQ(constraints_.size(), 0) << "WhenDone() was not called";
@@ -81,6 +87,7 @@ void ConstraintBuilder3D::MaybeAddConstraint(
     const NodeId& node_id, const TrajectoryNode::Data* const constant_data,
     const transform::Rigid3d& global_node_pose,
     const transform::Rigid3d& global_submap_pose) {
+  if (shutdown_) return;
   if ((global_node_pose.translation() - global_submap_pose.translation())
           .norm() > options_.max_constraint_distance()) {
     return;
@@ -93,6 +100,7 @@ void ConstraintBuilder3D::MaybeAddConstraint(
   }
 
   absl::MutexLock locker(&mutex_);
+  if (shutdown_) return;
   if (when_done_) {
     LOG(WARNING)
         << "MaybeAddConstraint was called while WhenDone was scheduled.";
@@ -101,8 +109,13 @@ void ConstraintBuilder3D::MaybeAddConstraint(
   kQueueLengthMetric->Set(constraints_.size());
   auto* const constraint = &constraints_.back();
   const auto* scan_matcher = DispatchScanMatcherConstruction(submap_id, submap);
+  if (!scan_matcher) {
+    constraints_.pop_back();
+    return;
+  }
   auto constraint_task = absl::make_unique<common::Task>();
   constraint_task->SetWorkItem([=]() LOCKS_EXCLUDED(mutex_) {
+    if (shutdown_) return;
     ComputeConstraint(submap_id, node_id, false, /* match_full_submap */
                       constant_data, global_node_pose, global_submap_pose,
                       *scan_matcher, constraint);
@@ -118,7 +131,9 @@ void ConstraintBuilder3D::MaybeAddGlobalConstraint(
     const NodeId& node_id, const TrajectoryNode::Data* const constant_data,
     const Eigen::Quaterniond& global_node_rotation,
     const Eigen::Quaterniond& global_submap_rotation) {
+  if (shutdown_) return;
   absl::MutexLock locker(&mutex_);
+  if (shutdown_) return;
   if (when_done_) {
     LOG(WARNING)
         << "MaybeAddGlobalConstraint was called while WhenDone was scheduled.";
@@ -127,8 +142,13 @@ void ConstraintBuilder3D::MaybeAddGlobalConstraint(
   kQueueLengthMetric->Set(constraints_.size());
   auto* const constraint = &constraints_.back();
   const auto* scan_matcher = DispatchScanMatcherConstruction(submap_id, submap);
+  if (!scan_matcher) {
+    constraints_.pop_back();
+    return;
+  }
   auto constraint_task = absl::make_unique<common::Task>();
   constraint_task->SetWorkItem([=]() LOCKS_EXCLUDED(mutex_) {
+    if (shutdown_) return;
     ComputeConstraint(submap_id, node_id, true, /* match_full_submap */
                       constant_data,
                       transform::Rigid3d::Rotation(global_node_rotation),
@@ -170,6 +190,7 @@ void ConstraintBuilder3D::WhenDone(
 const ConstraintBuilder3D::SubmapScanMatcher*
 ConstraintBuilder3D::DispatchScanMatcherConstruction(const SubmapId& submap_id,
                                                      const Submap3D* submap) {
+  if (shutdown_) return nullptr;
   if (submap_scan_matchers_.count(submap_id) != 0) {
     return &submap_scan_matchers_.at(submap_id);
   }
@@ -185,7 +206,8 @@ ConstraintBuilder3D::DispatchScanMatcherConstruction(const SubmapId& submap_id,
       &submap->rotational_scan_matcher_histogram();
   auto scan_matcher_task = absl::make_unique<common::Task>();
   scan_matcher_task->SetWorkItem(
-      [&submap_scan_matcher, &scan_matcher_options, histogram]() {
+      [this, &submap_scan_matcher, &scan_matcher_options, histogram]() {
+        if (shutdown_) return;
         submap_scan_matcher.fast_correlative_scan_matcher =
             absl::make_unique<scan_matching::FastCorrelativeScanMatcher3D>(
                 *submap_scan_matcher.high_resolution_hybrid_grid,

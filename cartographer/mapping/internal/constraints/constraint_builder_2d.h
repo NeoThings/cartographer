@@ -18,6 +18,7 @@
 #define CARTOGRAPHER_MAPPING_INTERNAL_CONSTRAINTS_CONSTRAINT_BUILDER_2D_H_
 
 #include <array>
+#include <atomic>
 #include <deque>
 #include <functional>
 #include <limits>
@@ -106,6 +107,9 @@ class ConstraintBuilder2D {
 
   static void RegisterMetrics(metrics::FamilyFactory* family_factory);
 
+  // Signals that shutdown is in progress;
+  void SetShutdown() { shutdown_ = true; }
+
  private:
   struct SubmapScanMatcher {
     const Grid2D* grid = nullptr;
@@ -168,6 +172,7 @@ class ConstraintBuilder2D {
 
   // Histogram of scan matcher scores.
   common::Histogram score_histogram_ GUARDED_BY(mutex_);
+  std::atomic<bool> shutdown_{false};
 };
 
 }  // namespace constraints

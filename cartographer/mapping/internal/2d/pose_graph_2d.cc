@@ -67,6 +67,12 @@ PoseGraph2D::PoseGraph2D(
 }
 
 PoseGraph2D::~PoseGraph2D() {
+  if (shutdown_) {
+    // Fast exit:
+    absl::MutexLock locker(&work_queue_mutex_);
+    work_queue_.reset();
+    return;
+  }
   WaitForAllComputations();
   absl::MutexLock locker(&work_queue_mutex_);
   CHECK(work_queue_ == nullptr);

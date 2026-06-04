@@ -57,6 +57,12 @@ PoseGraph3D::PoseGraph3D(
       thread_pool_(thread_pool) {}
 
 PoseGraph3D::~PoseGraph3D() {
+  if (shutdown_) {
+    // Fast exit:
+    absl::MutexLock locker(&work_queue_mutex_);
+    work_queue_.reset();
+    return;
+  }
   WaitForAllComputations();
   absl::MutexLock locker(&work_queue_mutex_);
   CHECK(work_queue_ == nullptr);

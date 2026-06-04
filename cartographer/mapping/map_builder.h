@@ -17,6 +17,7 @@
 #ifndef CARTOGRAPHER_MAPPING_MAP_BUILDER_H_
 #define CARTOGRAPHER_MAPPING_MAP_BUILDER_H_
 
+#include <atomic>
 #include <memory>
 
 #include "cartographer/common/thread_pool.h"
@@ -33,7 +34,11 @@ namespace mapping {
 class MapBuilder : public MapBuilderInterface {
  public:
   explicit MapBuilder(const proto::MapBuilderOptions &options);
-  ~MapBuilder() override {}
+  ~MapBuilder() override;
+
+  // Call before destruction to skip WaitForAllComputations() and exit fast.
+  // WARNING: This abandons pending work. Only use when exiting the process.
+  void Shutdown();
 
   MapBuilder(const MapBuilder &) = delete;
   MapBuilder &operator=(const MapBuilder &) = delete;
@@ -88,6 +93,7 @@ class MapBuilder : public MapBuilderInterface {
   common::ThreadPool thread_pool_;
 
   std::unique_ptr<PoseGraph> pose_graph_;
+  std::atomic<bool> shutdown_{false};
 
   std::unique_ptr<sensor::CollatorInterface> sensor_collator_;
   std::vector<std::unique_ptr<mapping::TrajectoryBuilderInterface>>

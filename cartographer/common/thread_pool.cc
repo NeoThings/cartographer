@@ -44,10 +44,12 @@ ThreadPool::ThreadPool(int num_threads) {
   }
 }
 
-ThreadPool::~ThreadPool() {
+ThreadPool::~ThreadPool() { Stop(); }
+
+void ThreadPool::Stop() {
   {
     absl::MutexLock locker(&mutex_);
-    CHECK(running_);
+    if (!running_) return;  // Already stopped.
     running_ = false;
   }
   for (std::thread& thread : pool_) {

@@ -62,6 +62,10 @@ class ThreadPool : public ThreadPoolInterface {
   ThreadPool(const ThreadPool&) = delete;
   ThreadPool& operator=(const ThreadPool&) = delete;
 
+  // Stops all worker threads and waits for them to finish. After this call,
+  // no more tasks will be executed. Safe to call multiple times.
+  void Stop() LOCKS_EXCLUDED(mutex_);
+
   // When the returned weak pointer is expired, 'task' has certainly completed,
   // so dependants no longer need to add it as a dependency.
   std::weak_ptr<Task> Schedule(std::unique_ptr<Task> task)

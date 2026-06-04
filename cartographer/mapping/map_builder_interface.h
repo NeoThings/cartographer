@@ -115,6 +115,11 @@ class MapBuilderInterface {
 
   virtual const std::vector<proto::TrajectoryBuilderOptionsWithSensorIds>&
   GetAllTrajectoryBuilderOptions() const = 0;
+
+  /* Send shutdown signal to pose_graph and constraint_builder,
+     Pending work (no constarints added after shutdown) 
+     will be waited while destruction */
+  virtual void Shutdown() {}
 };
 
 }  // namespace mapping

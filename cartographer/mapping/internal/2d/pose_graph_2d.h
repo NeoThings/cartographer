@@ -17,6 +17,7 @@
 #ifndef CARTOGRAPHER_MAPPING_INTERNAL_2D_POSE_GRAPH_2D_H_
 #define CARTOGRAPHER_MAPPING_INTERNAL_2D_POSE_GRAPH_2D_H_
 
+#include <atomic>
 #include <deque>
 #include <functional>
 #include <limits>
@@ -114,6 +115,10 @@ class PoseGraph2D : public PoseGraph {
       const std::vector<Constraint>& constraints) override;
   void AddTrimmer(std::unique_ptr<PoseGraphTrimmer> trimmer) override;
   void RunFinalOptimization() override;
+  void SetShutdown() override {
+    shutdown_ = true;
+    constraint_builder_.SetShutdown();
+  }
   std::vector<std::vector<int>> GetConnectedTrajectories() const override
       LOCKS_EXCLUDED(mutex_);
   PoseGraphInterface::SubmapData GetSubmapData(const SubmapId& submap_id) const
@@ -294,6 +299,8 @@ class PoseGraph2D : public PoseGraph {
    private:
     PoseGraph2D* const parent_;
   };
+private:
+  std::atomic<bool> shutdown_{false};
 };
 
 }  // namespace mapping

@@ -99,6 +99,32 @@ MapBuilder::MapBuilder(const proto::MapBuilderOptions& options)
   }
 }
 
+MapBuilder::~MapBuilder() {
+  if (shutdown_) {
+    // Fast shutdown: skip WaitForAllComputations() in pose_graph_ destructor.
+    trajectory_builders_.clear();
+    sensor_collator_.reset();
+    // Stop the thread pool FIRST — joins all in-flight tasks while
+    // pose_graph_ (and its constraint_builder_, grids, etc.) are still alive.
+    std::cout << "[MapBuilder destruction] Wait all works done" << std::endl;
+    thread_pool_.Stop();
+    std::cout << "[MapBuilder destruction] All works done" << std::endl;
+    // Now safe to destroy pose_graph_ — no pool tasks are running.
+    pose_graph_.reset();
+    // Implicit destruction of already-stopped thread_pool_ and others is safe.
+  }
+  // When shutdown_ is false, default member destruction order handles it:
+  // pose_graph_ destroyed first (calls WaitForAllComputations, pool is alive),
+  // then thread_pool_ destroyed (joins threads).
+}
+
+void MapBuilder::Shutdown() {
+  shutdown_ = true;
+  if (pose_graph_) {
+    pose_graph_->SetShutdown();
+  }
+}
+
 int MapBuilder::AddTrajectoryBuilder(
     const std::set<SensorId>& expected_sensor_ids,
     const proto::TrajectoryBuilderOptions& trajectory_options,

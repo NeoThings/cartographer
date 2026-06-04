@@ -17,6 +17,7 @@
 #ifndef CARTOGRAPHER_MAPPING_INTERNAL_3D_POSE_GRAPH_3D_H_
 #define CARTOGRAPHER_MAPPING_INTERNAL_3D_POSE_GRAPH_3D_H_
 
+#include <atomic>
 #include <deque>
 #include <functional>
 #include <limits>
@@ -112,6 +113,10 @@ class PoseGraph3D : public PoseGraph {
       const std::vector<Constraint>& constraints) override;
   void AddTrimmer(std::unique_ptr<PoseGraphTrimmer> trimmer) override;
   void RunFinalOptimization() override;
+  void SetShutdown() override {
+    shutdown_ = true;
+    constraint_builder_.SetShutdown();
+  }
   std::vector<std::vector<int>> GetConnectedTrajectories() const override
       LOCKS_EXCLUDED(mutex_);
   PoseGraph::SubmapData GetSubmapData(const SubmapId& submap_id) const
@@ -294,6 +299,9 @@ class PoseGraph3D : public PoseGraph {
    private:
     PoseGraph3D* const parent_;
   };
+
+private:
+  std::atomic<bool> shutdown_{false};
 };
 
 }  // namespace mapping
