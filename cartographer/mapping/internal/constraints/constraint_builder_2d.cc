@@ -294,6 +294,10 @@ void ConstraintBuilder2D::ComputeConstraint(
                                    Constraint::INTER_SUBMAP});
 
   if (options_.log_matches()) {
+    // skip the constraint between the same trajectory
+    // if(node_id.trajectory_id == submap_id.trajectory_id) {
+    //   return;
+    // }
     std::ostringstream info;
     info << "Node " << node_id << " with "
          << constant_data->filtered_gravity_aligned_point_cloud.size()
@@ -338,6 +342,11 @@ void ConstraintBuilder2D::RunWhenDoneCallback() {
 int ConstraintBuilder2D::GetNumFinishedNodes() {
   absl::MutexLock locker(&mutex_);
   return num_finished_nodes_;
+}
+
+int ConstraintBuilder2D::GetNumPendingConstraintComputations() {
+  absl::MutexLock locker(&mutex_);
+  return constraints_.size();
 }
 
 void ConstraintBuilder2D::DeleteScanMatcher(const SubmapId& submap_id) {

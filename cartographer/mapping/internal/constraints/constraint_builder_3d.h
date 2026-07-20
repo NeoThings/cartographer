@@ -109,6 +109,10 @@ class ConstraintBuilder3D {
   // Returns the number of consecutive finished nodes.
   int GetNumFinishedNodes();
 
+  // Number of constraint computations currently scheduled or running in the
+  // thread pool.
+  int GetNumPendingConstraintComputations();
+
   // Delete data related to 'submap_id'.
   void DeleteScanMatcher(const SubmapId& submap_id);
 

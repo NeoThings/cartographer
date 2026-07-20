@@ -174,15 +174,18 @@ NodeId PoseGraph2D::AddNode(
   // execute the lambda.
   const bool newly_finished_submap =
       insertion_submaps.front()->insertion_finished();
-  AddWorkItem([=]() LOCKS_EXCLUDED(mutex_) {
-    return ComputeConstraintsForNode(node_id, insertion_submaps,
-                                     newly_finished_submap);
-  });
+  AddWorkItem(
+      [=]() LOCKS_EXCLUDED(mutex_) {
+        return ComputeConstraintsForNode(node_id, insertion_submaps,
+                                         newly_finished_submap);
+      },
+      WorkItem::Type::kComputeConstraint);
   return node_id;
 }
 
 void PoseGraph2D::AddWorkItem(
-    const std::function<WorkItem::Result()>& work_item) {
+    const std::function<WorkItem::Result()>& work_item,
+    const WorkItem::Type type) {
   absl::MutexLock locker(&work_queue_mutex_);
   if (work_queue_ == nullptr) {
     work_queue_ = absl::make_unique<WorkQueue>();
@@ -191,7 +194,7 @@ void PoseGraph2D::AddWorkItem(
     thread_pool_->Schedule(std::move(task));
   }
   const auto now = std::chrono::steady_clock::now();
-  work_queue_->push_back({now, work_item});
+  work_queue_->push_back({now, work_item, type});
   kWorkQueueSizeMetric->Set(work_queue_->size());
   kWorkQueueDelayMetric->Set(
       std::chrono::duration_cast<std::chrono::duration<double>>(
@@ -554,7 +557,8 @@ void PoseGraph2D::HandleWorkQueue(
 
 void PoseGraph2D::DrainWorkQueue() {
   bool process_work_queue = true;
-  size_t work_queue_size;
+  size_t work_queue_size = 0;
+  WorkQueueCounts work_queue_counts;
   while (process_work_queue) {
     std::function<WorkItem::Result()> work_item;
     {
@@ -566,11 +570,28 @@ void PoseGraph2D::DrainWorkQueue() {
       work_item = work_queue_->front().task;
       work_queue_->pop_front();
       work_queue_size = work_queue_->size();
+      work_queue_counts = CountWorkQueueByType(*work_queue_);
       kWorkQueueSizeMetric->Set(work_queue_size);
     }
     process_work_queue = work_item() == WorkItem::Result::kDoNotRunOptimization;
   }
-  LOG(INFO) << "Remaining work items in queue: " << work_queue_size;
+  /**
+   * @brief Print the number of work items by type in the work queue
+   * add_data: add sensor data to SPA
+   * compute_constraint: task of searching constraint
+   * run_optimization: finish trajectory and fianl optimization will add, so the value is usually 0
+   * pending constraint computations in thread pool: task of node and submap matching
+   *  one compute_constraint task will generate many pending（each qualified submap pair）
+   *  numbler of pending ≫ number ofcompute_constraint
+   */
+  const int pending_constraint_computations =
+      constraint_builder_.GetNumPendingConstraintComputations();
+  LOG(INFO) << "Remaining work items in queue: " << work_queue_size
+            << " (add_data: " << work_queue_counts.add_data
+            << ", compute_constraint: " << work_queue_counts.compute_constraint
+            << ", run_optimization: " << work_queue_counts.run_optimization
+            << "), pending constraint computations in thread pool: "
+            << pending_constraint_computations;
   // We have to optimize again.
   constraint_builder_.WhenDone(
       [this](const constraints::ConstraintBuilder2D::Result& result) {
@@ -668,16 +689,19 @@ void PoseGraph2D::DeleteTrajectory(const int trajectory_id) {
 }
 
 void PoseGraph2D::FinishTrajectory(const int trajectory_id) {
-  AddWorkItem([this, trajectory_id]() LOCKS_EXCLUDED(mutex_) {
-    absl::MutexLock locker(&mutex_);
-    CHECK(!IsTrajectoryFinished(trajectory_id));
-    data_.trajectories_state[trajectory_id].state = TrajectoryState::FINISHED;
+  AddWorkItem(
+      [this, trajectory_id]() LOCKS_EXCLUDED(mutex_) {
+        absl::MutexLock locker(&mutex_);
+        CHECK(!IsTrajectoryFinished(trajectory_id));
+        data_.trajectories_state[trajectory_id].state =
+            TrajectoryState::FINISHED;
 
-    for (const auto& submap : data_.submap_data.trajectory(trajectory_id)) {
-      data_.submap_data.at(submap.id).state = SubmapState::kFinished;
-    }
-    return WorkItem::Result::kRunOptimization;
-  });
+        for (const auto& submap : data_.submap_data.trajectory(trajectory_id)) {
+          data_.submap_data.at(submap.id).state = SubmapState::kFinished;
+        }
+        return WorkItem::Result::kRunOptimization;
+      },
+      WorkItem::Type::kRunOptimization);
 }
 
 bool PoseGraph2D::IsTrajectoryFinished(const int trajectory_id) const {
@@ -875,12 +899,14 @@ void PoseGraph2D::AddTrimmer(std::unique_ptr<PoseGraphTrimmer> trimmer) {
 
 void PoseGraph2D::RunFinalOptimization() {
   {
-    AddWorkItem([this]() LOCKS_EXCLUDED(mutex_) {
-      absl::MutexLock locker(&mutex_);
-      optimization_problem_->SetMaxNumIterations(
-          options_.max_num_final_iterations());
-      return WorkItem::Result::kRunOptimization;
-    });
+    AddWorkItem(
+        [this]() LOCKS_EXCLUDED(mutex_) {
+          absl::MutexLock locker(&mutex_);
+          optimization_problem_->SetMaxNumIterations(
+              options_.max_num_final_iterations());
+          return WorkItem::Result::kRunOptimization;
+        },
+        WorkItem::Type::kRunOptimization);
     AddWorkItem([this]() LOCKS_EXCLUDED(mutex_) {
       absl::MutexLock locker(&mutex_);
       optimization_problem_->SetMaxNumIterations(

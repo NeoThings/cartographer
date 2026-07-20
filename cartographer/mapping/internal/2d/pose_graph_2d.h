@@ -169,7 +169,8 @@ class PoseGraph2D : public PoseGraph {
       const EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   // Handles a new work item.
-  void AddWorkItem(const std::function<WorkItem::Result()>& work_item)
+  void AddWorkItem(const std::function<WorkItem::Result()>& work_item,
+                   WorkItem::Type type = WorkItem::Type::kAddData)
       LOCKS_EXCLUDED(mutex_) LOCKS_EXCLUDED(work_queue_mutex_);
 
   // Adds connectivity and sampler for a trajectory if it does not exist.

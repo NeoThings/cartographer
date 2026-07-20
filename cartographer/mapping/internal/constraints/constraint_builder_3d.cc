@@ -359,6 +359,11 @@ int ConstraintBuilder3D::GetNumFinishedNodes() {
   return num_finished_nodes_;
 }
 
+int ConstraintBuilder3D::GetNumPendingConstraintComputations() {
+  absl::MutexLock locker(&mutex_);
+  return constraints_.size();
+}
+
 void ConstraintBuilder3D::DeleteScanMatcher(const SubmapId& submap_id) {
   absl::MutexLock locker(&mutex_);
   if (when_done_) {

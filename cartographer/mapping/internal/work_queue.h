@@ -30,11 +30,42 @@ struct WorkItem {
     kRunOptimization,
   };
 
+  enum class Type {
+    kAddData,
+    kComputeConstraint,
+    kRunOptimization,
+  };
+
   std::chrono::steady_clock::time_point time;
   std::function<Result()> task;
+  Type type = Type::kAddData;
 };
 
 using WorkQueue = std::deque<WorkItem>;
+
+struct WorkQueueCounts {
+  size_t add_data = 0;
+  size_t compute_constraint = 0;
+  size_t run_optimization = 0;
+};
+
+inline WorkQueueCounts CountWorkQueueByType(const WorkQueue& queue) {
+  WorkQueueCounts counts;
+  for (const WorkItem& item : queue) {
+    switch (item.type) {
+      case WorkItem::Type::kAddData:
+        ++counts.add_data;
+        break;
+      case WorkItem::Type::kComputeConstraint:
+        ++counts.compute_constraint;
+        break;
+      case WorkItem::Type::kRunOptimization:
+        ++counts.run_optimization;
+        break;
+    }
+  }
+  return counts;
+}
 
 }  // namespace mapping
 }  // namespace cartographer
