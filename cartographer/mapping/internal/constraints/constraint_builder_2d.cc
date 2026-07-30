@@ -118,14 +118,17 @@ void ConstraintBuilder2D::MaybeAddConstraint(
     constraints_.pop_back();
     return;
   }
+  num_pending_constraint_computations_.fetch_add(1);
   auto constraint_task = absl::make_unique<common::Task>();
   constraint_task->SetWorkItem([=]() LOCKS_EXCLUDED(mutex_) {
     // re-check while the work is actually in progress
-    if (shutdown_) return;
-    ComputeConstraint(submap_id, submap, node_id, false, /* match_full_submap */
-                      enhance_search,
-                      constant_data, initial_relative_pose, *scan_matcher,
-                      constraint);
+    if (!shutdown_) {
+      ComputeConstraint(submap_id, submap, node_id, false, /* match_full_submap */
+                        enhance_search,
+                        constant_data, initial_relative_pose, *scan_matcher,
+                        constraint);
+    }
+    num_pending_constraint_computations_.fetch_sub(1);
   });
   constraint_task->AddDependency(scan_matcher->creation_task_handle);
   auto constraint_task_handle =
@@ -135,8 +138,15 @@ void ConstraintBuilder2D::MaybeAddConstraint(
 
 void ConstraintBuilder2D::MaybeAddGlobalConstraint(
     const SubmapId& submap_id, const Submap2D* const submap,
-    const NodeId& node_id, const TrajectoryNode::Data* const constant_data) {
+    const NodeId& node_id, const TrajectoryNode::Data* const constant_data,
+    const transform::Rigid2d& initial_relative_pose) {
   if (shutdown_) return;
+  if (options_.limit_global_constraint_distance()) {
+    const double distance = initial_relative_pose.translation().norm();
+    if (distance > options_.max_constraint_distance()) {
+      return;
+    }
+  }
   absl::MutexLock locker(&mutex_);
   // re-check while the work is actually in progress
   if (shutdown_) return;
@@ -153,14 +163,17 @@ void ConstraintBuilder2D::MaybeAddGlobalConstraint(
     constraints_.pop_back();
     return;
   }
+  num_pending_constraint_computations_.fetch_add(1);
   auto constraint_task = absl::make_unique<common::Task>();
   constraint_task->SetWorkItem([=]() LOCKS_EXCLUDED(mutex_) {
     // re-check while the work is actually in progress
-    if (shutdown_) return;
-    ComputeConstraint(submap_id, submap, node_id, true, /* match_full_submap */
-                      false, /* match full submap don't need enhance */
-                      constant_data, transform::Rigid2d::Identity(),
-                      *scan_matcher, constraint);
+    if (!shutdown_) {
+      ComputeConstraint(submap_id, submap, node_id, true, /* match_full_submap */
+                        false, /* match full submap don't need enhance */
+                        constant_data, transform::Rigid2d::Identity(),
+                        *scan_matcher, constraint);
+    }
+    num_pending_constraint_computations_.fetch_sub(1);
   });
   constraint_task->AddDependency(scan_matcher->creation_task_handle);
   auto constraint_task_handle =
@@ -254,7 +267,9 @@ void ConstraintBuilder2D::ComputeConstraint(
       CHECK_GE(submap_id.trajectory_id, 0);
       kGlobalConstraintsFoundMetric->Increment();
       kGlobalConstraintScoresMetric->Observe(score);
+      ++num_global_match_succeeded_;
     } else {
+      ++num_global_match_failed_;
       return;
     }
   } else {
@@ -266,7 +281,9 @@ void ConstraintBuilder2D::ComputeConstraint(
       CHECK_GT(score, options_.min_score());
       kConstraintsFoundMetric->Increment();
       kConstraintScoresMetric->Observe(score);
+      ++num_local_match_succeeded_;
     } else {
+      ++num_local_match_failed_;
       return;
     }
   }
@@ -336,6 +353,16 @@ void ConstraintBuilder2D::RunWhenDoneCallback() {
     when_done_.reset();
     kQueueLengthMetric->Set(constraints_.size());
   }
+  if (options_.log_constraint_search()) {
+    const int local_fail = num_local_match_failed_.exchange(0);
+    const int global_fail = num_global_match_failed_.exchange(0);
+    const int local_ok = num_local_match_succeeded_.exchange(0);
+    const int global_ok = num_global_match_succeeded_.exchange(0);
+    LOG(INFO) << "\n [Debug] Constraint search summary: \n"
+              << " local_ok/fail=" << local_ok << "/" << local_fail
+              << " global_ok/fail=" << global_ok << "/" << global_fail
+              << " result_constraints=" << result.size();
+  }
   (*callback)(result);
 }
 
@@ -345,8 +372,7 @@ int ConstraintBuilder2D::GetNumFinishedNodes() {
 }
 
 int ConstraintBuilder2D::GetNumPendingConstraintComputations() {
-  absl::MutexLock locker(&mutex_);
-  return constraints_.size();
+  return num_pending_constraint_computations_.load();
 }
 
 void ConstraintBuilder2D::DeleteScanMatcher(const SubmapId& submap_id) {

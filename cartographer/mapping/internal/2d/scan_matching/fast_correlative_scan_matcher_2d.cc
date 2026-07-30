@@ -259,8 +259,9 @@ bool FastCorrelativeScanMatcher2D::MatchWithSearchParameters(
   const Candidate2D best_candidate = BranchAndBound(
       discrete_scans, search_parameters, lowest_resolution_candidates,
       precomputation_grid_stack_->max_depth(), min_score);
+  // Always report best score so callers can log near-misses below threshold.
+  *score = best_candidate.score;
   if (best_candidate.score > min_score) {
-    *score = best_candidate.score;
     *pose_estimate = transform::Rigid2d(
         {initial_pose_estimate.translation().x() + best_candidate.x,
          initial_pose_estimate.translation().y() + best_candidate.y},

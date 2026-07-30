@@ -89,11 +89,13 @@ class PoseGraph2DTest : public ::testing::Test {
             constraint_builder = {
               sampling_ratio = 1.,
               max_constraint_distance = 6.,
+              max_constraint_candidates = 0,
               min_score = 0.5,
               global_localization_min_score = 0.6,
               loop_closure_translation_weight = 1.,
               loop_closure_rotation_weight = 1.,
               log_matches = true,
+              log_constraint_search = false,
               fast_correlative_scan_matcher = {
                 linear_search_window = 3.,
                 angular_search_window = 0.1,

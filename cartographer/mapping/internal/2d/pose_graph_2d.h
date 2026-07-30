@@ -199,9 +199,32 @@ class PoseGraph2D : public PoseGraph {
       bool newly_finished_submap) LOCKS_EXCLUDED(mutex_);
 
   // Computes constraints for a node and submap pair.
-  void ComputeConstraint(const NodeId& node_id, const SubmapId& submap_id, 
-                         bool enhance_search)
+  // If force_local is true (newly finished submap vs old nodes), always use a
+  // local search window and do not gate on recently_connected.
+  void ComputeConstraint(const NodeId& node_id, const SubmapId& submap_id,
+                         bool enhance_search, bool force_local = false)
       LOCKS_EXCLUDED(mutex_);
+
+  // Selects finished submaps near the node for constraint search:
+  // distance <= max_constraint_distance, then up to max_constraint_candidates
+  // with fair per-trajectory allocation so no trajectory is starved when
+  // multiple reference trajectories are present. In localization mode skips
+  // same-trajectory submaps. Local vs global search is decided later in
+  // ComputeConstraint.
+  std::vector<SubmapId> SelectNearbyFinishedSubmapCandidates(
+      const NodeId& node_id,
+      const transform::Rigid2d& node_global_pose_2d,
+      const bool enhance_search) const
+      EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+
+  // Selects old nodes near a newly finished submap for constraint search:
+  // distance <= max_constraint_distance, then up to max_constraint_candidates
+  // with fair per-trajectory allocation. Skips nodes already in the submap.
+  // In localization mode skips same-trajectory nodes.
+  std::vector<NodeId> SelectNearbyNodeCandidates(
+      const SubmapId& submap_id,
+      const std::set<NodeId>& exclude_node_ids) const
+      EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   // Deletes trajectories waiting for deletion. Must not be called during
   // constraint search.
@@ -271,6 +294,9 @@ class PoseGraph2D : public PoseGraph {
   // List of all trimmers to consult when optimizations finish.
   std::vector<std::unique_ptr<PoseGraphTrimmer>> trimmers_ GUARDED_BY(mutex_);
 
+  // Cached: true if any PureLocalizationTrimmer is currently in trimmers_.
+  bool has_pure_localization_trimmer_ GUARDED_BY(mutex_) = false;
+
   PoseGraphData data_ GUARDED_BY(mutex_);
 
   ValueConversionTables conversion_tables_;
@@ -301,6 +327,17 @@ class PoseGraph2D : public PoseGraph {
     PoseGraph2D* const parent_;
   };
 private:
+  // Per trajectory-pair Diff-traj ComputeConstraint stats (logged in DrainWorkQueue).
+  // Key is std::minmax(trajectory_a, trajectory_b).
+  struct DiffTrajPairStats {
+    int local = 0;
+    int global = 0;
+    int skip = 0;
+    // Age of LastConnectionTime vs node_time in milliseconds; -1 = never connected.
+    int64 last_age_ms = -1;
+  };
+  std::map<std::pair<int, int>, DiffTrajPairStats> diff_traj_pair_stats_
+      GUARDED_BY(mutex_);
   std::atomic<bool> shutdown_{false};
 };
 

@@ -29,6 +29,14 @@ message ConstraintBuilderOptions {
   // Threshold for poses to be considered near a submap.
   double max_constraint_distance = 2;
 
+  // Maximum number of finished submaps to consider for constraint search per
+  // node, after distance filtering (nearest first). 0 means unlimited.
+  int32 max_constraint_candidates = 16;
+
+  // If enabled, global (full-submap) constraints are only created when the
+  // initial relative pose distance is within max_constraint_distance.
+  bool limit_global_constraint_distance = 17;
+
   // Threshold for the scan match score below which a match is not considered.
   // Low scores indicate that the scan and map do not look similar.
   double min_score = 4;
@@ -46,6 +54,11 @@ message ConstraintBuilderOptions {
 
   // If enabled, logs information of loop-closing constraints for debugging.
   bool log_matches = 8;
+
+  // If enabled, logs why constraint search is skipped/fails (distance, sampling,
+  // local/global decision, match score). Useful for diagnosing missing
+  // inter-trajectory constraints.
+  bool log_constraint_search = 15;
 
   // Options for the internally used scan matchers.
   mapping.scan_matching.proto.FastCorrelativeScanMatcherOptions2D

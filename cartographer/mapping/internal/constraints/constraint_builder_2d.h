@@ -89,7 +89,8 @@ class ConstraintBuilder2D {
   // all computations are finished.
   void MaybeAddGlobalConstraint(
       const SubmapId& submap_id, const Submap2D* submap, const NodeId& node_id,
-      const TrajectoryNode::Data* const constant_data);
+      const TrajectoryNode::Data* const constant_data,
+      const transform::Rigid2d& initial_relative_pose);
 
   // Must be called after all computations related to one node have been added.
   void NotifyEndOfNode();
@@ -177,6 +178,16 @@ class ConstraintBuilder2D {
   // Histogram of scan matcher scores.
   common::Histogram score_histogram_ GUARDED_BY(mutex_);
   std::atomic<bool> shutdown_{false};
+
+  // Number of constraint tasks currently scheduled or running in the thread
+  // pool. Unlike constraints_.size(), this decreases as each task finishes.
+  std::atomic<int> num_pending_constraint_computations_{0};
+
+  // Aggregated search diagnostics (printed once per WhenDone when enabled).
+  std::atomic<int> num_local_match_failed_{0};
+  std::atomic<int> num_global_match_failed_{0};
+  std::atomic<int> num_local_match_succeeded_{0};
+  std::atomic<int> num_global_match_succeeded_{0};
 };
 
 }  // namespace constraints

@@ -24,7 +24,7 @@ namespace mapping {
 
 namespace {
 
-constexpr double kSensorDataRatesLoggingPeriodSeconds = 15.;
+constexpr double kSensorDataRatesLoggingPeriodSeconds = 3600.; // default: 15
 
 }  // namespace
 

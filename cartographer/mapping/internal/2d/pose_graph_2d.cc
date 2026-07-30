@@ -24,9 +24,12 @@
 #include <iostream>
 #include <iterator>
 #include <limits>
+#include <map>
 #include <memory>
 #include <sstream>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "Eigen/Eigenvalues"
 #include "absl/memory/memory.h"
@@ -40,6 +43,70 @@
 
 namespace cartographer {
 namespace mapping {
+namespace {
+
+// Trims distance-sorted candidates to max_candidates by round-robin across
+// trajectories so that no trajectory is entirely starved.
+template <typename Candidate>
+void TrimCandidatesFairlyByTrajectory(std::vector<Candidate>* candidates,
+                                      const int max_candidates) {
+  if (max_candidates <= 0 ||
+      candidates->size() <= static_cast<size_t>(max_candidates)) {
+    return;
+  }
+
+  std::map<int, std::vector<Candidate>> by_trajectory;
+  for (const Candidate& candidate : *candidates) {
+    by_trajectory[candidate.id.trajectory_id].push_back(candidate);
+  }
+
+  std::vector<int> trajectory_ids;
+  trajectory_ids.reserve(by_trajectory.size());
+  for (const auto& traj_candidates : by_trajectory) {
+    trajectory_ids.push_back(traj_candidates.first);
+  }
+  // Prefer trajectories whose nearest candidate is closer when we cannot keep
+  // every trajectory (num_trajectories > max_candidates).
+  std::sort(trajectory_ids.begin(), trajectory_ids.end(),
+            [&by_trajectory](const int a, const int b) {
+              return by_trajectory[a].front().distance <
+                     by_trajectory[b].front().distance;
+            });
+
+  std::vector<Candidate> selected;
+  selected.reserve(static_cast<size_t>(max_candidates));
+  std::map<int, size_t> next_index;
+  for (const int trajectory_id : trajectory_ids) {
+    next_index[trajectory_id] = 0;
+  }
+
+  bool added_in_round = true;
+  while (selected.size() < static_cast<size_t>(max_candidates) &&
+         added_in_round) {
+    added_in_round = false;
+    for (const int trajectory_id : trajectory_ids) {
+      if (selected.size() >= static_cast<size_t>(max_candidates)) {
+        break;
+      }
+      const size_t index = next_index[trajectory_id];
+      const auto& traj_candidates = by_trajectory[trajectory_id];
+      if (index >= traj_candidates.size()) {
+        continue;
+      }
+      selected.push_back(traj_candidates[index]);
+      next_index[trajectory_id] = index + 1;
+      added_in_round = true;
+    }
+  }
+
+  std::sort(selected.begin(), selected.end(),
+            [](const Candidate& a, const Candidate& b) {
+              return a.distance < b.distance;
+            });
+  *candidates = std::move(selected);
+}
+
+}  // namespace
 
 static auto* kWorkQueueDelayMetric = metrics::Gauge::Null();
 static auto* kWorkQueueSizeMetric = metrics::Gauge::Null();
@@ -273,7 +340,7 @@ void PoseGraph2D::AddLandmarkData(int trajectory_id,
 
 void PoseGraph2D::ComputeConstraint(const NodeId& node_id,
                                     const SubmapId& submap_id,
-                                    bool enhance_search) {
+                                    bool enhance_search, bool force_local) {
   bool maybe_add_local_constraint = false;
   bool maybe_add_global_constraint = false;
   const TrajectoryNode::Data* constant_data;
@@ -286,26 +353,54 @@ void PoseGraph2D::ComputeConstraint(const NodeId& node_id,
       // constraint search before that.
       return;
     }
-
     const common::Time node_time = GetLatestNodeTime(node_id, submap_id);
     const common::Time last_connection_time =
         data_.trajectory_connectivity_state.LastConnectionTime(
             node_id.trajectory_id, submap_id.trajectory_id);
-    if (node_id.trajectory_id == submap_id.trajectory_id ||
+    // Judge if the node and the submap belong to the same trajectory
+    const bool same_trajectory =
+        node_id.trajectory_id == submap_id.trajectory_id;
+    // Judge if the node and the submap are recently connected
+    const bool recently_connected =
         node_time < last_connection_time +
-        common::FromSeconds(options_.global_constraint_search_after_n_seconds()) ||
-        (options_.optimization_on_first_node() && 
-        data_.trajectory_nodes.SizeOfTrajectoryOrZero(node_id.trajectory_id) == 1)) {
+        common::FromSeconds(options_.global_constraint_search_after_n_seconds());
+    // Judge if we need to enhance the search for the first node of the trajectory
+    const bool first_node_enhanced =
+        options_.optimization_on_first_node() &&
+        data_.trajectory_nodes.SizeOfTrajectoryOrZero(node_id.trajectory_id) == 1;
+    // Newly finished submap candidates are already distance-filtered; do not
+    // gate local search on recently_connected for that path.
+    if (force_local || same_trajectory || recently_connected ||
+        first_node_enhanced) {
       // If the node and the submap belong to the same trajectory or if there
       // has been a recent global constraint that ties that node's trajectory to
       // the submap's trajectory, it suffices to do a match constrained to a
       // local search window.
-      // std::cout << "[debug] maybe add local constraint between node: " 
-      //           << node_id.trajectory_id << ", " << node_id.node_index << " and submap: "
-      //           << submap_id.trajectory_id << ", " << submap_id.submap_index << std::endl;
       maybe_add_local_constraint = true;
     } else if (global_localization_samplers_[node_id.trajectory_id]->Pulse()) {
       maybe_add_global_constraint = true;
+    }
+    if (!same_trajectory) {
+      DiffTrajPairStats& pair_stats =
+          diff_traj_pair_stats_[std::minmax(node_id.trajectory_id,
+                                            submap_id.trajectory_id)];
+      if (maybe_add_local_constraint) {
+        ++pair_stats.local;
+      } else if (maybe_add_global_constraint) {
+        ++pair_stats.global;
+      } else {
+        ++pair_stats.skip;
+      }
+      // Track age of LastConnectionTime vs node_time.
+      if (last_connection_time == common::Time()) {
+        pair_stats.last_age_ms = -1;
+      } else {
+        const int64 age_ms = static_cast<int64>(
+            std::max(0.0,
+                     common::ToSeconds(node_time - last_connection_time)) *
+            1000.0);
+        pair_stats.last_age_ms = age_ms;
+      }
     }
     constant_data = data_.trajectory_nodes.at(node_id).constant_data.get();
     submap = static_cast<const Submap2D*>(
@@ -321,8 +416,14 @@ void PoseGraph2D::ComputeConstraint(const NodeId& node_id,
     constraint_builder_.MaybeAddConstraint(
         submap_id, submap, node_id, enhance_search, constant_data, initial_relative_pose);
   } else if (maybe_add_global_constraint) {
+    const transform::Rigid2d initial_relative_pose =
+        optimization_problem_->submap_data()
+            .at(submap_id)
+            .global_pose.inverse() *
+        optimization_problem_->node_data().at(node_id).global_pose_2d;
     constraint_builder_.MaybeAddGlobalConstraint(submap_id, submap, node_id,
-                                                 constant_data);
+                                                 constant_data,
+                                                 initial_relative_pose);
   }
 }
 
@@ -332,7 +433,10 @@ WorkItem::Result PoseGraph2D::ComputeConstraintsForNode(
     const bool newly_finished_submap) {
   std::vector<SubmapId> submap_ids;
   std::vector<SubmapId> finished_submap_ids;
-  std::set<NodeId> newly_finished_submap_node_ids;
+  std::vector<NodeId> nearby_node_ids;
+  transform::Rigid2d node_global_pose_2d;
+  bool trigger_optimization = false;
+  bool enhance_search = false;
   {
     absl::MutexLock locker(&mutex_);
     const auto& constant_data =
@@ -345,14 +449,14 @@ WorkItem::Result PoseGraph2D::ComputeConstraintsForNode(
         transform::Project2D(constant_data->local_pose *
                              transform::Rigid3d::Rotation(
                                  constant_data->gravity_alignment.inverse()));
-    const transform::Rigid2d global_pose_2d =
+    node_global_pose_2d =
         optimization_problem_->submap_data().at(matching_id).global_pose *
         constraints::ComputeSubmapPose(*insertion_submaps.front()).inverse() *
         local_pose_2d;
     optimization_problem_->AddTrajectoryNode(
         matching_id.trajectory_id,
         optimization::NodeSpec2D{constant_data->time, local_pose_2d,
-                                 global_pose_2d,
+                                 node_global_pose_2d,
                                  constant_data->gravity_alignment});
     for (size_t i = 0; i < insertion_submaps.size(); ++i) {
       const SubmapId submap_id = submap_ids[i];
@@ -373,58 +477,38 @@ WorkItem::Result PoseGraph2D::ComputeConstraintsForNode(
                      Constraint::INTRA_SUBMAP});
     }
 
-    // TODO(gaschler): Consider not searching for constraints against
-    // trajectories scheduled for deletion.
-    // TODO(danielsievers): Add a member variable and avoid having to copy
-    // them out here.
-    for (const auto& submap_id_data : data_.submap_data) {
-      if (submap_id_data.data.state == SubmapState::kFinished) {
-        CHECK_EQ(submap_id_data.data.node_ids.count(node_id), 0);
-        finished_submap_ids.emplace_back(submap_id_data.id);
-      }
+    if (options_.optimization_on_first_node() && 
+        data_.trajectory_nodes.SizeOfTrajectoryOrZero(node_id.trajectory_id) == 1) {
+      trigger_optimization = true;
+      enhance_search = true;
+      std::cout << "[Debug] ------ Trigger optimazation and enhance search once" << std::endl;
     }
+
+    finished_submap_ids =
+        SelectNearbyFinishedSubmapCandidates(node_id, node_global_pose_2d, enhance_search);
+        
     if (newly_finished_submap) {
       const SubmapId newly_finished_submap_id = submap_ids.front();
       InternalSubmapData& finished_submap_data =
           data_.submap_data.at(newly_finished_submap_id);
       CHECK(finished_submap_data.state == SubmapState::kNoConstraintSearch);
       finished_submap_data.state = SubmapState::kFinished;
-      newly_finished_submap_node_ids = finished_submap_data.node_ids;
+      nearby_node_ids = SelectNearbyNodeCandidates(
+          newly_finished_submap_id, finished_submap_data.node_ids);
     }
   }
 
-  bool trigger_optimization = false;
-  bool enhance_search = false;
-  if (options_.optimization_on_first_node() && 
-      data_.trajectory_nodes.SizeOfTrajectoryOrZero(node_id.trajectory_id) == 1) {
-    trigger_optimization = true;
-    enhance_search = true;
-    std::cout << "[Debug] ------ Trigger optimazation and enhance search once" << std::endl;
-  }
-
   for (const auto& submap_id : finished_submap_ids) {
-    // std::cout << "[debug] search constraint from submap: " 
-    //           << submap_id.trajectory_id << ", " 
-    //           << submap_id.submap_index << std::endl;
     ComputeConstraint(node_id, submap_id, enhance_search);
   }
 
-  if (newly_finished_submap) { 
-    /* TODO: we only push the pure localization trimmer right now, 
-       so we can use empty to verify, if we push other trimmers to queue
-       we need check if it can convert to pure localization trimmer */
-    if (trimmers_.empty()) {
-      const SubmapId newly_finished_submap_id = submap_ids.front();
-      // We have a new completed submap, so we look into adding constraints for
-      // old nodes.
-      for (const auto& node_id_data : optimization_problem_->node_data()) {
-        const NodeId& node_id = node_id_data.id;
-        if (newly_finished_submap_node_ids.count(node_id) == 0) {
-          ComputeConstraint(node_id, newly_finished_submap_id, false);
-        }
-      }
-    } else {
-      std::cout << "[Debug] ------ Skip constraints: newly_finished_submap w.r.t old nodes" << std::endl;
+  if (newly_finished_submap) {
+    // We have a new completed submap, so we look into adding constraints for
+    // nearby old nodes.
+    const SubmapId newly_finished_submap_id = submap_ids.front();
+    for (const NodeId& old_node_id : nearby_node_ids) {
+      ComputeConstraint(old_node_id, newly_finished_submap_id,
+                        /*enhance_search=*/false, /*force_local=*/true);
     }
   }
   constraint_builder_.NotifyEndOfNode();
@@ -437,6 +521,118 @@ WorkItem::Result PoseGraph2D::ComputeConstraintsForNode(
     return WorkItem::Result::kRunOptimization;
   }
   return WorkItem::Result::kDoNotRunOptimization;
+}
+
+std::vector<SubmapId> PoseGraph2D::SelectNearbyFinishedSubmapCandidates(
+    const NodeId& node_id,
+    const transform::Rigid2d& node_global_pose_2d,
+    const bool enhance_search) const {
+  const double max_distance =
+      options_.constraint_builder_options().max_constraint_distance();
+  const int max_candidates =
+      options_.constraint_builder_options().max_constraint_candidates();
+  // Pure localization: only match against the frozen map,
+  // not short-lived localization trajectory submaps.
+  const bool localization_mode = has_pure_localization_trimmer_;
+
+  struct Candidate {
+    SubmapId id;
+    double distance;
+  };
+  std::vector<Candidate> candidates;
+  for (const auto& submap_id_data : data_.submap_data) {
+    if (submap_id_data.data.state != SubmapState::kFinished) {
+      continue;
+    }
+    const SubmapId& submap_id = submap_id_data.id;
+    CHECK_EQ(submap_id_data.data.node_ids.count(node_id), 0);
+    if (localization_mode &&
+        submap_id.trajectory_id == node_id.trajectory_id) {
+      continue;
+    }
+    if (!optimization_problem_->submap_data().Contains(submap_id)) {
+      continue;
+    }
+    const transform::Rigid2d submap_global_pose =
+        optimization_problem_->submap_data().at(submap_id).global_pose;
+    const double distance =
+        (node_global_pose_2d.translation() - submap_global_pose.translation())
+            .norm();
+    if (distance > max_distance) {
+      continue;
+    }
+    candidates.push_back({submap_id, distance});
+  }
+
+  std::sort(candidates.begin(), candidates.end(),
+            [](const Candidate& a, const Candidate& b) {
+              return a.distance < b.distance;
+            });
+
+  if (!enhance_search) {
+    TrimCandidatesFairlyByTrajectory(&candidates, max_candidates);
+  }
+
+  std::vector<SubmapId> result;
+  result.reserve(candidates.size());
+  for (const Candidate& candidate : candidates) {
+    result.push_back(candidate.id);
+  }
+  return result;
+}
+
+std::vector<NodeId> PoseGraph2D::SelectNearbyNodeCandidates(
+    const SubmapId& submap_id,
+    const std::set<NodeId>& exclude_node_ids) const {
+  const double max_distance =
+      options_.constraint_builder_options().max_constraint_distance();
+  const int max_candidates =
+      options_.constraint_builder_options().max_constraint_candidates();
+  // Pure localization: only match against frozen-map nodes,
+  // not short-lived localization trajectory nodes.
+  const bool localization_mode = has_pure_localization_trimmer_;
+
+  CHECK(optimization_problem_->submap_data().Contains(submap_id));
+  const transform::Rigid2d submap_global_pose =
+      optimization_problem_->submap_data().at(submap_id).global_pose;
+
+  struct Candidate {
+    NodeId id;
+    double distance;
+  };
+  std::vector<Candidate> candidates;
+  for (const auto& node_id_data : optimization_problem_->node_data()) {
+    const NodeId& node_id = node_id_data.id;
+    if (exclude_node_ids.count(node_id) > 0) {
+      continue;
+    }
+    if (localization_mode &&
+        node_id.trajectory_id == submap_id.trajectory_id) {
+      continue;
+    }
+    const double distance =
+        (node_id_data.data.global_pose_2d.translation() -
+         submap_global_pose.translation())
+            .norm();
+    if (distance > max_distance) {
+      continue;
+    }
+    candidates.push_back({node_id, distance});
+  }
+
+  std::sort(candidates.begin(), candidates.end(),
+            [](const Candidate& a, const Candidate& b) {
+              return a.distance < b.distance;
+            });
+
+  TrimCandidatesFairlyByTrajectory(&candidates, max_candidates);
+
+  std::vector<NodeId> result;
+  result.reserve(candidates.size());
+  for (const Candidate& candidate : candidates) {
+    result.push_back(candidate.id);
+  }
+  return result;
 }
 
 common::Time PoseGraph2D::GetLatestNodeTime(const NodeId& node_id,
@@ -529,6 +725,12 @@ void PoseGraph2D::HandleWorkQueue(
                          return trimmer->IsFinished();
                        }),
         trimmers_.end());
+    has_pure_localization_trimmer_ = std::any_of(
+        trimmers_.begin(), trimmers_.end(),
+        [](const std::unique_ptr<PoseGraphTrimmer>& trimmer) {
+          return dynamic_cast<const PureLocalizationTrimmer*>(trimmer.get()) !=
+                 nullptr;
+        });
 
     num_nodes_since_last_loop_closure_ = 0;
 
@@ -577,21 +779,56 @@ void PoseGraph2D::DrainWorkQueue() {
   }
   /**
    * @brief Print the number of work items by type in the work queue
-   * add_data: add sensor data to SPA
-   * compute_constraint: task of searching constraint
+   * add_data: the number of sensor data added to SPA
+   * compute_constraint: the number of tasks of searching constraint
    * run_optimization: finish trajectory and fianl optimization will add, so the value is usually 0
-   * pending constraint computations in thread pool: task of node and submap matching
+   * pending constraint computations in thread pool: the number of in-flight node-submap matches
+   *  (+1 when scheduled, -1 when a background task finishes; see ConstraintBuilder2D)
    *  one compute_constraint task will generate many pending（each qualified submap pair）
-   *  numbler of pending ≫ number ofcompute_constraint
    */
   const int pending_constraint_computations =
       constraint_builder_.GetNumPendingConstraintComputations();
-  LOG(INFO) << "Remaining work items in queue: " << work_queue_size
-            << " (add_data: " << work_queue_counts.add_data
-            << ", compute_constraint: " << work_queue_counts.compute_constraint
-            << ", run_optimization: " << work_queue_counts.run_optimization
-            << "), pending constraint computations in thread pool: "
-            << pending_constraint_computations;
+  LOG(INFO) << "\n" 
+            << "  Remaining work items in queue: " << work_queue_size << "\n"
+            << "  - add_data: " << work_queue_counts.add_data << "\n"
+            << "  - compute_constraint: " << work_queue_counts.compute_constraint << "\n"
+            << "  - run_optimization: " << work_queue_counts.run_optimization << "\n"
+            << "  - pending constraint computations in thread pool: "<< pending_constraint_computations;
+  /**
+   * @brief Print the diff-traj decisions since last optimization
+   * 
+   */
+  if (options_.constraint_builder_options().log_constraint_search()) {
+    std::map<std::pair<int, int>, DiffTrajPairStats> pair_stats;
+    {
+      absl::MutexLock locker(&mutex_);
+      pair_stats.swap(diff_traj_pair_stats_);
+    }
+    const double threshold_s =
+        options_.global_constraint_search_after_n_seconds();
+    std::ostringstream info;
+    info << "\n[Debug] Diff-traj decisions since last opt"
+         << " (threshold=" << std::fixed << std::setprecision(2) << threshold_s
+         << "s):";
+    if (pair_stats.empty()) {
+      info << "\n  (no diff-traj decisions)";
+    } else {
+      for (const auto& entry : pair_stats) {
+        const int traj_a = entry.first.first;
+        const int traj_b = entry.first.second;
+        const DiffTrajPairStats& stats = entry.second;
+        info << "\n  pair (" << traj_a << ", " << traj_b << "):"
+             << " local=" << stats.local << " global=" << stats.global
+             << " skip=" << stats.skip;
+        if (stats.last_age_ms < 0) {
+          info << " connection_age=never";
+        } else {
+          info << " connection_age=" << (stats.last_age_ms / 1000.0) << "s";
+        }
+      }
+    }
+    LOG(INFO) << info.str();
+  }
   // We have to optimize again.
   constraint_builder_.WhenDone(
       [this](const constraints::ConstraintBuilder2D::Result& result) {
@@ -892,6 +1129,9 @@ void PoseGraph2D::AddTrimmer(std::unique_ptr<PoseGraphTrimmer> trimmer) {
   PoseGraphTrimmer* const trimmer_ptr = trimmer.release();
   AddWorkItem([this, trimmer_ptr]() LOCKS_EXCLUDED(mutex_) {
     absl::MutexLock locker(&mutex_);
+    if (dynamic_cast<PureLocalizationTrimmer*>(trimmer_ptr) != nullptr) {
+      has_pure_localization_trimmer_ = true;
+    }
     trimmers_.emplace_back(trimmer_ptr);
     return WorkItem::Result::kDoNotRunOptimization;
   });
