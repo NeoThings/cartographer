@@ -35,6 +35,7 @@
 #include "absl/memory/memory.h"
 #include "cartographer/common/math.h"
 #include "cartographer/mapping/internal/2d/overlapping_submaps_trimmer_2d.h"
+#include "cartographer/mapping/pose_graph_runtime_options.h"
 #include "cartographer/mapping/proto/pose_graph/constraint_builder_options.pb.h"
 #include "cartographer/sensor/compressed_point_cloud.h"
 #include "cartographer/sensor/internal/voxel_filter.h"
@@ -1613,6 +1614,21 @@ PoseGraph2D::GetSubmapDataUnderLock() const {
 void PoseGraph2D::SetGlobalSlamOptimizationCallback(
     PoseGraphInterface::GlobalSlamOptimizationCallback callback) {
   global_slam_optimization_callback_ = callback;
+}
+
+std::string PoseGraph2D::SetRuntimeOptions(
+    const std::vector<std::pair<std::string, std::string>>& name_value_pairs) {
+  absl::MutexLock locker(&mutex_);
+  const std::string error =
+      ApplyPoseGraphRuntimeOptions(name_value_pairs, &options_);
+  if (!error.empty()) {
+    return error;
+  }
+  constraint_builder_.SetOptions(options_.constraint_builder_options());
+  optimization_problem_->SetOptions(options_.optimization_problem_options());
+  LOG(INFO) << "Updated pose graph runtime options ("
+            << name_value_pairs.size() << " entries).";
+  return "";
 }
 
 void PoseGraph2D::RegisterMetrics(metrics::FamilyFactory* family_factory) {

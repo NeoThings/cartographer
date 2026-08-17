@@ -161,6 +161,9 @@ class PoseGraph2D : public PoseGraph {
   transform::Rigid3d GetInterpolatedGlobalTrajectoryPose(
       int trajectory_id, const common::Time time) const
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+  std::string SetRuntimeOptions(
+      const std::vector<std::pair<std::string, std::string>>& name_value_pairs)
+      override LOCKS_EXCLUDED(mutex_);
 
   static void RegisterMetrics(metrics::FamilyFactory* family_factory);
 
@@ -268,7 +271,8 @@ class PoseGraph2D : public PoseGraph {
   void UpdateTrajectoryConnectivity(const Constraint& constraint)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
-  const proto::PoseGraphOptions options_;
+  // Mutable for runtime option updates via SetRuntimeOptions().
+  proto::PoseGraphOptions options_;
   GlobalSlamOptimizationCallback global_slam_optimization_callback_;
   mutable absl::Mutex mutex_;
   absl::Mutex work_queue_mutex_;

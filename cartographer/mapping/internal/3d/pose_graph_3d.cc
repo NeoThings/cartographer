@@ -30,6 +30,7 @@
 #include "Eigen/Eigenvalues"
 #include "absl/memory/memory.h"
 #include "cartographer/common/math.h"
+#include "cartographer/mapping/pose_graph_runtime_options.h"
 #include "cartographer/mapping/proto/pose_graph/constraint_builder_options.pb.h"
 #include "cartographer/sensor/compressed_point_cloud.h"
 #include "cartographer/sensor/internal/voxel_filter.h"
@@ -1314,6 +1315,21 @@ PoseGraph3D::GetSubmapDataUnderLock() const {
 void PoseGraph3D::SetGlobalSlamOptimizationCallback(
     PoseGraphInterface::GlobalSlamOptimizationCallback callback) {
   global_slam_optimization_callback_ = callback;
+}
+
+std::string PoseGraph3D::SetRuntimeOptions(
+    const std::vector<std::pair<std::string, std::string>>& name_value_pairs) {
+  absl::MutexLock locker(&mutex_);
+  const std::string error =
+      ApplyPoseGraphRuntimeOptions(name_value_pairs, &options_);
+  if (!error.empty()) {
+    return error;
+  }
+  constraint_builder_.SetOptions(options_.constraint_builder_options());
+  optimization_problem_->SetOptions(options_.optimization_problem_options());
+  LOG(INFO) << "Updated pose graph runtime options ("
+            << name_value_pairs.size() << " entries).";
+  return "";
 }
 
 void PoseGraph3D::RegisterMetrics(metrics::FamilyFactory* family_factory) {

@@ -116,6 +116,9 @@ class ConstraintBuilder3D {
   // Delete data related to 'submap_id'.
   void DeleteScanMatcher(const SubmapId& submap_id);
 
+  // Updates runtime-tunable options. Scan matcher objects are not rebuilt.
+  void SetOptions(const proto::ConstraintBuilderOptions& options);
+
   static void RegisterMetrics(metrics::FamilyFactory* family_factory);
 
   // Signals that shutdown is in progress
@@ -150,7 +153,8 @@ class ConstraintBuilder3D {
 
   void RunWhenDoneCallback() LOCKS_EXCLUDED(mutex_);
 
-  const proto::ConstraintBuilderOptions options_;
+  // Mutable so runtime thresholds/weights can be updated via SetOptions.
+  proto::ConstraintBuilderOptions options_;
   common::ThreadPoolInterface* thread_pool_;
   absl::Mutex mutex_;
 

@@ -76,6 +76,10 @@ class OptimizationProblem3D
                     const transform::Rigid3d& global_submap_pose) override;
   void TrimSubmap(const SubmapId& submap_id) override;
   void SetMaxNumIterations(int32 max_num_iterations) override;
+  void SetOptions(
+      const optimization::proto::OptimizationProblemOptions& options) {
+    options_ = options;
+  }
 
   void Solve(
       const std::vector<Constraint>& constraints,

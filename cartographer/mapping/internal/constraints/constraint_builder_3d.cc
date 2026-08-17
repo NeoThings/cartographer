@@ -375,6 +375,25 @@ void ConstraintBuilder3D::DeleteScanMatcher(const SubmapId& submap_id) {
   kNumSubmapScanMatchersMetric->Set(submap_scan_matchers_.size());
 }
 
+void ConstraintBuilder3D::SetOptions(
+    const proto::ConstraintBuilderOptions& options) {
+  absl::MutexLock locker(&mutex_);
+  options_.set_sampling_ratio(options.sampling_ratio());
+  options_.set_max_constraint_distance(options.max_constraint_distance());
+  options_.set_max_constraint_candidates(options.max_constraint_candidates());
+  options_.set_limit_global_constraint_distance(
+      options.limit_global_constraint_distance());
+  options_.set_min_score(options.min_score());
+  options_.set_global_localization_min_score(
+      options.global_localization_min_score());
+  options_.set_loop_closure_translation_weight(
+      options.loop_closure_translation_weight());
+  options_.set_loop_closure_rotation_weight(
+      options.loop_closure_rotation_weight());
+  options_.set_log_matches(options.log_matches());
+  options_.set_log_constraint_search(options.log_constraint_search());
+}
+
 void ConstraintBuilder3D::RegisterMetrics(metrics::FamilyFactory* factory) {
   auto* counts = factory->NewCounterFamily(
       "mapping_constraints_constraint_builder_3d_constraints",

@@ -135,6 +135,14 @@ class PoseGraph : public PoseGraphInterface {
                                         const transform::Rigid3d& pose,
                                         const common::Time time) = 0;
 
+  // Applies runtime overrides for a subset of pose graph options.
+  // 'name_value_pairs' use dotted keys relative to POSE_GRAPH.
+  // Returns an empty string on success, otherwise an error message.
+  virtual std::string SetRuntimeOptions(
+      const std::vector<std::pair<std::string, std::string>>& name_value_pairs) {
+    return "SetRuntimeOptions is not supported.";
+  }
+
   /* Signals the pose graph to skip WaitForAllComputations() 
      and pass signal to constraint builder
      Pending work will be consumed (computation without add constraints).
