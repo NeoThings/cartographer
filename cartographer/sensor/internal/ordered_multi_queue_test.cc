@@ -94,6 +94,30 @@ TEST_F(OrderedMultiQueueTest, MarkQueueAsFinished) {
   }
 }
 
+TEST_F(OrderedMultiQueueTest, DropsUnsortedData) {
+  queue_.Add(kFirst, MakeImu(1));
+  queue_.Add(kSecond, MakeImu(1));
+  queue_.Add(kThird, MakeImu(1));
+  ASSERT_EQ(1, values_.size());
+
+  // Older than already dispatched data; must not crash.
+  queue_.Add(kFirst, MakeImu(0));
+  EXPECT_EQ(1, values_.size());
+
+  queue_.Add(kFirst, MakeImu(2));
+  queue_.Add(kSecond, MakeImu(2));
+  queue_.Add(kThird, MakeImu(2));
+  queue_.Flush();
+
+  EXPECT_EQ(6, values_.size());
+  for (size_t i = 0; i < values_.size(); ++i) {
+    EXPECT_GE(common::ToUniversal(values_[i]->GetTime()), 1);
+  }
+  for (size_t i = 0; i < values_.size() - 1; ++i) {
+    EXPECT_LE(values_[i]->GetTime(), values_[i + 1]->GetTime());
+  }
+}
+
 TEST_F(OrderedMultiQueueTest, CommonStartTimePerTrajectory) {
   queue_.Add(kFirst, MakeImu(0));
   queue_.Add(kFirst, MakeImu(1));

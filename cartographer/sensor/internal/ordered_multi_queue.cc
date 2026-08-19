@@ -109,13 +109,21 @@ void OrderedMultiQueue::Dispatch() {
         next_queue = &it->second;
         next_queue_key = it->first;
       }
-      CHECK_LE(last_dispatched_time_, next_data->GetTime())
-          << "Non-sorted data added to queue: '" << it->first << "'";
       ++it;
     }
     if (next_data == nullptr) {
       CHECK(queues_.empty());
       return;
+    }
+    // Unsorted / late sensor data would previously CHECK-fail here. Drop it so
+    // mapping can continue; downstream components also assume monotonic time.
+    if (next_data->GetTime() < last_dispatched_time_) {
+      LOG(WARNING) << "Dropping non-sorted data added to queue: '"
+                   << next_queue_key << "' with time " << next_data->GetTime()
+                   << " which is before last dispatched time "
+                   << last_dispatched_time_;
+      next_queue->queue.Pop();
+      continue;
     }
 
     // If we haven't dispatched any data for this trajectory yet, fast forward

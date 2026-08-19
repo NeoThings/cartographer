@@ -63,8 +63,8 @@ class OrderedMultiQueue {
   // will be removed once the last piece of data from it has been dispatched.
   void MarkQueueAsFinished(const QueueKey& queue_key);
 
-  // Adds 'data' to a queue with the given 'queue_key'. Data must be added
-  // sorted per queue.
+  // Adds 'data' to a queue with the given 'queue_key'. Data should be added
+  // sorted per queue; packets older than already dispatched data are dropped.
   void Add(const QueueKey& queue_key, std::unique_ptr<Data> data);
 
   // Dispatches all remaining values in sorted order and removes the underlying
