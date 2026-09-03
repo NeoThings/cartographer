@@ -20,8 +20,11 @@
 #include <memory>
 
 #include "absl/memory/memory.h"
+#include "cartographer/mapping/internal/2d/wall_direction.h"
 #include "cartographer/metrics/family_factory.h"
 #include "cartographer/sensor/range_data.h"
+#include "cartographer/transform/transform.h"
+#include "glog/logging.h"
 
 namespace cartographer {
 namespace mapping {
@@ -131,6 +134,11 @@ LocalTrajectoryBuilder2D::AddRangeData(
   const common::Time time_first_point =
       time +
       common::FromSeconds(synchronized_data.ranges.front().point_time.time);
+
+  // When aligning to walls, the first pose is deferred until we have range data
+  // for PCA. Use the earliest point time so ExtrapolatePose stays valid.
+  MaybeAddInitialExtrapolatorPose(time_first_point, synchronized_data);
+
   if (time_first_point < extrapolator_->GetLastPoseTime()) {
     LOG(INFO) << "Extrapolator is still initializing.";
     return nullptr;
@@ -328,7 +336,34 @@ void LocalTrajectoryBuilder2D::InitializeExtrapolator(const common::Time time) {
       options_.pose_extrapolator_options()
           .constant_velocity()
           .imu_gravity_time_constant());
-  extrapolator_->AddPose(time, transform::Rigid3d::Identity());
+  // Defer the first pose when aligning to walls so RANSAC can set the initial yaw.
+  if (!options_.align_to_wall_direction()) {
+    extrapolator_->AddPose(time, transform::Rigid3d::Identity());
+  }
+}
+
+void LocalTrajectoryBuilder2D::MaybeAddInitialExtrapolatorPose(
+    const common::Time time,
+    const sensor::TimedPointCloudOriginData& range_data) {
+  if (extrapolator_ == nullptr ||
+      extrapolator_->GetLastPoseTime() != common::Time::min()) {
+    return;
+  }
+
+  transform::Rigid3d initial_pose = transform::Rigid3d::Identity();
+  if (options_.align_to_wall_direction()) {
+    const absl::optional<double> yaw = EstimateInitialYawToAlignWalls(
+        range_data, options_.min_range(), options_.max_range(), options_.min_z(),
+        options_.max_z());
+    if (yaw.has_value()) {
+      initial_pose = transform::Rigid3d::Rotation(
+          Eigen::AngleAxisd(yaw.value(), Eigen::Vector3d::UnitZ()));
+    } else {
+      LOG(WARNING)
+          << "align_to_wall: line extraction failed, using Identity initial pose.";
+    }
+  }
+  extrapolator_->AddPose(time, initial_pose);
 }
 
 void LocalTrajectoryBuilder2D::RegisterMetrics(

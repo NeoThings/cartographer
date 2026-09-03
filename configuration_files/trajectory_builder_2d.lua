@@ -22,6 +22,10 @@ TRAJECTORY_BUILDER_2D = {
   num_accumulated_range_data = 1,
   voxel_filter_size = 0.025,
 
+  -- Align wall to nearest of {+/-x, +/-y} via RANSAC on the first scan.
+  -- Automatically disabled when finished/frozen trajectories already exist.
+  align_to_wall_direction = false,
+
   adaptive_voxel_filter = {
     max_length = 0.5,
     min_num_points = 200,

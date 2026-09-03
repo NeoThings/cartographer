@@ -99,6 +99,12 @@ class LocalTrajectoryBuilder2D {
   // Lazily constructs a PoseExtrapolator.
   void InitializeExtrapolator(common::Time time);
 
+  // Adds the first extrapolator pose. When align_to_wall_direction is enabled,
+  // uses RANSAC on 'range_data' to choose the initial yaw; otherwise Identity
+  // (unless a pose was already added during InitializeExtrapolator).
+  void MaybeAddInitialExtrapolatorPose(
+      common::Time time, const sensor::TimedPointCloudOriginData& range_data);
+
   const proto::LocalTrajectoryBuilderOptions2D options_;
   ActiveSubmaps2D active_submaps_;
 

@@ -66,6 +66,8 @@ proto::LocalTrajectoryBuilderOptions2D CreateLocalTrajectoryBuilderOptions2D(
   *options.mutable_submaps_options() = CreateSubmapsOptions2D(
       parameter_dictionary->GetDictionary("submaps").get());
   options.set_use_imu_data(parameter_dictionary->GetBool("use_imu_data"));
+  options.set_align_to_wall_direction(
+      parameter_dictionary->GetBool("align_to_wall_direction"));
   return options;
 }
 

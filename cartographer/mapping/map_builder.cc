@@ -53,6 +53,16 @@ std::vector<std::string> SelectRangeSensorIds(
   return range_sensor_ids;
 }
 
+bool HasFinishedOrFrozenTrajectory(const PoseGraph* const pose_graph) {
+  for (const auto& entry : pose_graph->GetTrajectoryStates()) {
+    if (entry.second == PoseGraphInterface::TrajectoryState::FINISHED ||
+        entry.second == PoseGraphInterface::TrajectoryState::FROZEN) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void MaybeAddPureLocalizationTrimmer(
     const int trajectory_id,
     const proto::TrajectoryBuilderOptions& trajectory_options,
@@ -102,16 +112,14 @@ MapBuilder::MapBuilder(const proto::MapBuilderOptions& options)
 MapBuilder::~MapBuilder() {
   if (shutdown_) {
     // Fast shutdown: skip WaitForAllComputations() in pose_graph_ destructor.
-    trajectory_builders_.clear();
-    sensor_collator_.reset();
-    // Stop the thread pool FIRST — joins all in-flight tasks while
-    // pose_graph_ (and its constraint_builder_, grids, etc.) are still alive.
+    // Stop the thread pool first so in-flight scan-matcher construction still
+    // sees live pose_graph_ / grids, then tear down the rest.
     std::cout << "[MapBuilder destruction] Wait all works done" << std::endl;
     thread_pool_.Stop();
     std::cout << "[MapBuilder destruction] All works done" << std::endl;
-    // Now safe to destroy pose_graph_ — no pool tasks are running.
+    trajectory_builders_.clear();
+    sensor_collator_.reset();
     pose_graph_.reset();
-    // Implicit destruction of already-stopped thread_pool_ and others is safe.
   }
   // When shutdown_ is false, default member destruction order handles it:
   // pose_graph_ destroyed first (calls WaitForAllComputations, pool is alive),
@@ -156,9 +164,18 @@ int MapBuilder::AddTrajectoryBuilder(
   } else {
     std::unique_ptr<LocalTrajectoryBuilder2D> local_trajectory_builder;
     if (trajectory_options.has_trajectory_builder_2d_options()) {
+      proto::LocalTrajectoryBuilderOptions2D options_2d =
+          trajectory_options.trajectory_builder_2d_options();
+      // Extending an existing finished/frozen map must keep the prior frame;
+      // do not re-align local axes to walls.
+      if (options_2d.align_to_wall_direction() &&
+          HasFinishedOrFrozenTrajectory(pose_graph_.get())) {
+        LOG(INFO) << "Disabling align_to_wall_direction: a finished or frozen "
+                     "trajectory already exists (map extension / localization).";
+        options_2d.set_align_to_wall_direction(false);
+      }
       local_trajectory_builder = absl::make_unique<LocalTrajectoryBuilder2D>(
-          trajectory_options.trajectory_builder_2d_options(),
-          SelectRangeSensorIds(expected_sensor_ids));
+          options_2d, SelectRangeSensorIds(expected_sensor_ids));
     }
     DCHECK(dynamic_cast<PoseGraph2D*>(pose_graph_.get()));
     trajectory_builders_.push_back(absl::make_unique<CollatedTrajectoryBuilder>(

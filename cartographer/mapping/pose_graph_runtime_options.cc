@@ -183,6 +183,18 @@ bool ApplyOneOption(const std::string& name, const std::string& value,
     constraint_builder->set_log_constraint_search(v);
     return true;
   }
+  if (name == "constraint_builder.max_loop_closure_translation_error") {
+    double v;
+    if (!ParseDouble(value, &v, error)) return false;
+    constraint_builder->set_max_loop_closure_translation_error(v);
+    return true;
+  }
+  if (name == "constraint_builder.max_loop_closure_rotation_error") {
+    double v;
+    if (!ParseDouble(value, &v, error)) return false;
+    constraint_builder->set_max_loop_closure_rotation_error(v);
+    return true;
+  }
 
   if (name == "optimization_problem.huber_scale") {
     double v;

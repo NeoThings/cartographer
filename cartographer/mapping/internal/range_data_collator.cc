@@ -59,7 +59,9 @@ sensor::TimedPointCloudOriginData RangeDataCollator::AddRangeData(
 
 sensor::TimedPointCloudOriginData RangeDataCollator::CropAndMerge() {
   sensor::TimedPointCloudOriginData result{current_end_, {}, {}};
-  bool warned_for_dropped_points = false;
+  // TODO: After switching the sensor setup, set warned to false so
+  // dropped earlier points can be used to evaluate sensor timing/data.
+  bool warned_for_dropped_points = true;
   for (auto it = id_to_pending_data_.begin();
        it != id_to_pending_data_.end();) {
     sensor::TimedPointCloudData& data = it->second;

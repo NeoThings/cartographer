@@ -60,6 +60,15 @@ message ConstraintBuilderOptions {
   // inter-trajectory constraints.
   bool log_constraint_search = 15;
 
+  // Reject an INTER constraint when the translation error between scan-match
+  // zbar_ij and the current graph prediction T_submap^{-1} * T_node exceeds
+  // this (meters). 0 disables the check.
+  double max_loop_closure_translation_error = 18;
+
+  // Reject an INTER constraint when the rotation error exceeds this (radians).
+  // 0 disables the check.
+  double max_loop_closure_rotation_error = 19;
+
   // Options for the internally used scan matchers.
   mapping.scan_matching.proto.FastCorrelativeScanMatcherOptions2D
       fast_correlative_scan_matcher_options = 9;

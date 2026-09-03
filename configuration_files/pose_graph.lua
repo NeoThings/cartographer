@@ -26,6 +26,10 @@ POSE_GRAPH = {
     loop_closure_rotation_weight = 1e5,
     log_matches = true,
     log_constraint_search = false,
+    -- Reject INTER constraints whose loop-closure error vs the current graph
+    -- exceeds these. 0 disables.
+    max_loop_closure_translation_error = 0.,  -- meters
+    max_loop_closure_rotation_error = 0.,     -- radians, e.g. math.rad(10.)
     fast_correlative_scan_matcher = {
       linear_search_window = 7.,
       angular_search_window = math.rad(30.),

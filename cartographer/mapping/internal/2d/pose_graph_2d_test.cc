@@ -96,6 +96,8 @@ class PoseGraph2DTest : public ::testing::Test {
               loop_closure_rotation_weight = 1.,
               log_matches = true,
               log_constraint_search = false,
+              max_loop_closure_translation_error = 0.,
+              max_loop_closure_rotation_error = 0.,
               fast_correlative_scan_matcher = {
                 linear_search_window = 3.,
                 angular_search_window = 0.1,

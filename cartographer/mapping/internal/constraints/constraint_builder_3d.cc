@@ -296,6 +296,27 @@ void ConstraintBuilder3D::ComputeConstraint(
                               /*intensity_hybrid_grid=*/nullptr}},
                             &constraint_transform, &unused_summary);
 
+  // Loop-closure error vs the current graph:
+  // zbar_ij^{-1} * (T_global_submap^{-1} * T_global_node).
+  const transform::Rigid3d initial_relative_pose =
+      global_submap_pose.inverse() * global_node_pose;
+  const transform::Rigid3d delta =
+      constraint_transform.inverse() * initial_relative_pose;
+  const double trans = delta.translation().norm();
+  const double rot = transform::GetAngle(delta);
+  const bool reject = node_id.node_index != 0 &&
+                      ((options_.max_loop_closure_translation_error() > 0. &&
+                        trans > options_.max_loop_closure_translation_error()) ||
+                       (options_.max_loop_closure_rotation_error() > 0. &&
+                        rot > options_.max_loop_closure_rotation_error()));
+  if (reject) {
+    LOG(INFO) << "Loop closure error n=" << node_id << " s=" << submap_id
+              << std::fixed << std::setprecision(2) << " " << trans << "m "
+              << common::RadToDeg(rot) << "deg " << std::setprecision(0)
+              << 100. * match_result->score << "% REJECTED";
+    return;
+  }
+
   constraint->reset(new Constraint{
       submap_id,
       node_id,
@@ -392,6 +413,8 @@ void ConstraintBuilder3D::SetOptions(
       options.loop_closure_rotation_weight());
   options_.set_log_matches(options.log_matches());
   options_.set_log_constraint_search(options.log_constraint_search());
+  options_.set_max_loop_closure_translation_error(options.max_loop_closure_translation_error());
+  options_.set_max_loop_closure_rotation_error(options.max_loop_closure_rotation_error());
 }
 
 void ConstraintBuilder3D::RegisterMetrics(metrics::FamilyFactory* factory) {
